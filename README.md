@@ -30,9 +30,11 @@ Anyone can replicate this analysis by following these steps:
 Because GitHub has a 100MB file size limit, the massive Swiss energy and geographic datasets cannot be hosted directly in this repository.
 *Note: The lightweight municipal population dataset (`px-x-0102020000_201.json`) is already bundled in the `data/raw/` folder for your convenience!*
 
-All datasets used in this study are publicly available via the Swiss Open Government Data portal. Download the following three files and place them exactly as named into the newly created data/raw/ folder:
+All datasets used in this study are publicly available via the Swiss Open Government Data portal and the Federal Statistical Office (BFS).
 
-    1. Federal Office of Energy (BFE) - Solar Installations
+Download the following files and place them exactly as named into the data/raw/ folder:
+
+1. Federal Office of Energy (BFE) - Solar Installations
 
         Source: [Elektrizitätsproduktionsanlagen](https://opendata.swiss/de/dataset/elektrizitatsproduktionsanlagen)
 
@@ -40,13 +42,37 @@ All datasets used in this study are publicly available via the Swiss Open Govern
 
         Save as: ElectricityProductionPlant.csv
 
-    2. Swisstopo - Official Directory of Towns and Cities
+2. Swisstopo - Official Directory of Towns and Cities
 
         Source: [Amtliches Ortschaftenverzeichnis](https://data.geo.admin.ch/ch.swisstopo-vd.ortschaftenverzeichnis_plz/ortschaftenverzeichnis_plz/ortschaftenverzeichnis_plz_2056.csv.zip)
 
         Action: Download the CSV (LV95 format).
 
         Save as: AMTOVZ_CSV_LV95.csv
+        
+3. BFS - Referendum Data (H2: Green Index)
+
+    Source: [Link to BFS Votations Database](https://www.pxweb.bfs.admin.ch/pxweb/fr/px-x-1703030000_101/px-x-1703030000_101/px-x-1703030000_101.px)
+
+    Action: Download the municipal results (Excel format) for the three major climate and energy votes.
+
+    Save as: * 2017Energy.Act_Outcome_YESSHARE.xlsx
+
+        2021CO2.Act_Outcome_YESSHARE.xlsx
+
+        2024Climate.Protection.Act_Outcome_YESSHARE.xlsx
+
+    Note: The script automatically averages the "Yes" shares of these three referendums to create a robust Green_Index.
+
+4. BFS - National Council Elections (H3: Left-Green Strength)
+
+    Source: [Link to BFS Elections Database](https://www.bfs.admin.ch/bfs/fr/home/statistiques/catalogue.assetdetail.28945919.html)
+
+    Action: Download the 2023 election results (NDJSON format).
+
+    Save as: NRW_2023_Dataset.json
+
+    Note: The script parses the JSON to extract the combined vote share of the SP and GPS parties per municipality.
         
         
 #### Live API Integration (ElCom Data)
