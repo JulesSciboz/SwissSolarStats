@@ -17,12 +17,16 @@ if(!require("lubridate")) install.packages("lubridate")
 if(!require("jsonlite")) install.packages("jsonlite")
 if(!require("stringr")) install.packages("stringr")
 if(!require("here")) install.packages("here") # NEW: For relative file paths
+if(!require("httr")) install.packages("httr")
+if(!require("ggplot2")) install.packages("ggplot2")
 
+library(ggplot2)
 library(readr)
 library(dplyr)
 library(lubridate)
 library(jsonlite)
 library(stringr)
+library(httr)
 library(here) # Initialize here
 
 print(paste("Project root automatically set to:", here()))
@@ -51,7 +55,7 @@ print(paste("Reading BFE file from:", bfe_file_path))
 all_plants_raw <- read_csv(bfe_file_path, locale = locale(encoding = "UTF-8"))
 
 # Clean & filter for Solar GROWTH (2018-2024)
-  solar_growth_clean <- all_plants_raw %>%
+solar_growth_clean <- all_plants_raw %>%
   filter(SubCategory == "subcat_2") %>% # Filter for Photovoltaic only [cite: 234, 235]
   mutate(operation_date = ymd(BeginningOfOperation)) %>%
   # *** CRITICAL FILTER: Start of 2018 to End of 2024 ***
@@ -120,6 +124,71 @@ population_clean <- pop_raw %>%
 print("Population data extracted.")
 
 # -------------------------------------------------------------------
+# STEP 4.5: FETCH ELCOM ELECTRICITY PRICES VIA LINDAS API (H1.A)
+# -------------------------------------------------------------------
+print("Fetching ElCom Historical Electricity Prices (2013-2023) via LINDAS API...")
+
+# Define the SPARQL query
+# Note: Text names for operators are removed to ensure strictly 1 row per BFS_Nr
+sparql_query <- '
+PREFIX schema: <http://schema.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX cube: <https://cube.link/>
+PREFIX dim: <https://energy.ld.admin.ch/elcom/electricityprice/dimension/>
+
+SELECT ?bfs_nr 
+       (AVG(?total_price) AS ?Mean_Price_13_23)
+       (MAX(?price_2023) AS ?Peak_Price_2023)
+       ((MAX(?price_2023) - MAX(?price_2013)) AS ?Delta_23_13)
+WHERE {
+  <https://energy.ld.admin.ch/elcom/electricityprice> cube:observationSet/cube:observation ?obs .
+  
+  ?obs dim:period ?period ;
+       dim:municipality ?municipality ;
+       dim:category <https://energy.ld.admin.ch/elcom/electricityprice/category/H4> ;
+       dim:product <https://energy.ld.admin.ch/elcom/electricityprice/product/standard> ;
+       dim:total ?total_price .
+       
+  ?municipality schema:identifier ?bfs_nr .
+  
+  FILTER(str(?period) >= "2013" && str(?period) <= "2023")
+  
+  BIND(IF(str(?period) = "2023", ?total_price, 0) AS ?price_2023)
+  BIND(IF(str(?period) = "2013", ?total_price, 0) AS ?price_2013)
+}
+GROUP BY ?bfs_nr
+'
+
+# The official LINDAS cached endpoint
+endpoint <- "https://ld.admin.ch/query"
+
+# Make the POST request
+response <- POST(
+  url = endpoint,
+  add_headers(Accept = "text/csv"),
+  body = list(query = sparql_query),
+  encode = "form"
+)
+
+# Parse the response directly into our dataframe
+if (status_code(response) == 200) {
+  elcom_raw <- read_csv(content(response, "text", encoding = "UTF-8"), show_col_types = FALSE)
+  
+  elcom_clean <- elcom_raw %>%
+    mutate(
+      BFS_Nr = as.numeric(bfs_nr),
+      Mean_Price_13_23 = as.numeric(Mean_Price_13_23),
+      Peak_Price_2023 = as.numeric(Peak_Price_2023),
+      Delta_23_13 = as.numeric(Delta_23_13)
+    ) %>%
+    select(BFS_Nr, Mean_Price_13_23, Peak_Price_2023, Delta_23_13)
+  
+  print(paste("Successfully fetched price metrics for", nrow(elcom_clean), "municipalities."))
+} else {
+  stop(paste("Failed to fetch data from LINDAS API. Status code:", status_code(response)))
+}
+
+# -------------------------------------------------------------------
 # STEP 5: JOIN EVERYTHING & CALCULATE DEPENDENT VARIABLES
 # -------------------------------------------------------------------
 
@@ -141,9 +210,10 @@ solar_agg_commune <- solar_mapped %>%
     .groups = "drop"
   )
 
-# 5c. Join with Population & Calculate Metrics
+# 5c. Join with Population, ElCom Data & Calculate Metrics
 final_dataset <- solar_agg_commune %>%
   left_join(population_clean, by = "BFS_Nr") %>%
+  left_join(elcom_clean, by = "BFS_Nr") %>%   # <--- ADDED: ElCom Electricity Prices (H1.A)
   mutate(
     # DV 1: New Capacity Density (Watts per Capita)
     New_Watts_per_Capita = (New_Solar_kW * 1000) / Population,
@@ -192,114 +262,23 @@ print("Analysis complete. Both rankings saved to data/processed/.")
 
 
 # -------------------------------------------------------------------
-# STEP 8: VISUALIZATION
+# STEP 8: TEMPORARY VISUALIZATION (DATA SANITY CHECK)
 # -------------------------------------------------------------------
-if(!require("ggplot2")) install.packages("ggplot2")
-library(ggplot2)
+print("Generating temporary scatter plot to visually check H1.A...")
 
-# 1. Calculate National Statistics (Mean & Median)
-stats_capacity <- final_dataset %>%
-  summarise(
-    Mean_Val = mean(New_Watts_per_Capita, na.rm = TRUE),
-    Median_Val = median(New_Watts_per_Capita, na.rm = TRUE)
-  )
-
-stats_intensity <- final_dataset %>%
-  summarise(
-    Mean_Val = mean(Adoption_Intensity, na.rm = TRUE),
-    Median_Val = median(Adoption_Intensity, na.rm = TRUE)
-  )
-
-print("National Statistics calculated.")
-print(stats_capacity)
-print(stats_intensity)
-
-
-# 2. Plot 1: Top 20 New Capacity Density (Watts per Capita)
-plot_capacity <- ggplot(head(top_capacity, 20), aes(x = reorder(Gemeindename, New_Watts_per_Capita), y = New_Watts_per_Capita)) +
-  geom_bar(stat = "identity", fill = "#2E8B57") + # Green color
-  coord_flip() + # Make bars horizontal for readability
-  
-  # Add Reference Lines for Average and Median
-  geom_hline(aes(yintercept = stats_capacity$Mean_Val, linetype = "Average"), color = "blue", size = 1) +
-  geom_hline(aes(yintercept = stats_capacity$Median_Val, linetype = "Median"), color = "red", size = 1) +
-  
-  # Labels and Titles
+# Temporary Scatter Plot: Price Shock (Delta) vs PV Adoption
+temp_plot <- ggplot(final_dataset, aes(x = Delta_23_13, y = New_Watts_per_Capita)) +
+  geom_point(alpha = 0.4, color = "#4682B4") + # Semi-transparent points for overlapping communes
+  geom_smooth(method = "lm", color = "red", se = TRUE) + # Red trend line
   labs(
-    title = "Top 20 Communes: New Solar Capacity Growth (2018-2024)",
-    subtitle = "Metric: Newly installed Watts per Capita",
-    x = "Commune",
-    y = "Watts per Capita",
-    caption = "Red line: Median | Blue line: Average"
+    title = "Sanity Check: Electricity Price Shock vs. PV Adoption",
+    subtitle = "Does a higher electricity price increase (2013-2023) lead to more solar?",
+    x = "Price Shock (Delta 2023 - 2013 in Rp./kWh)",
+    y = "New PV Capacity (Watts per Capita)"
   ) +
   theme_minimal()
 
-# Save Plot 1
-ggsave(here("plots", "plot_top20_capacity.png"), plot = plot_capacity, width = 10, height = 8)
-print(plot_capacity)
+# Display the plot in the RStudio Viewer
+print(temp_plot)
 
-
-# 3. Plot 2: Top 20 Adoption Intensity (Installations per 1000 people)
-plot_intensity <- ggplot(head(top_intensity, 20), aes(x = reorder(Gemeindename, Adoption_Intensity), y = Adoption_Intensity)) +
-  geom_bar(stat = "identity", fill = "#4682B4") + # Blue color
-  coord_flip() +
-  
-  # Add Reference Lines for Average and Median
-  geom_hline(aes(yintercept = stats_intensity$Mean_Val, linetype = "Average"), color = "darkblue", size = 1) +
-  geom_hline(aes(yintercept = stats_intensity$Median_Val, linetype = "Median"), color = "red", size = 1) +
-  
-  # Labels and Titles
-  labs(
-    title = "Top 20 Communes: Solar Adoption Intensity (2018-2024)",
-    subtitle = "Metric: Number of new installations per 1,000 inhabitants",
-    x = "Commune",
-    y = "Installations per 1,000 inhabitants",
-    caption = "Red line: Median | Blue line: Average"
-  ) +
-  theme_minimal()
-
-# Save Plot 2
-ggsave(here("plots", "plot_top20_intensity.png"), plot = plot_intensity, width = 10, height = 8)
-print(plot_intensity)
-
-print("Graphics saved to project folder.")
-
-# -------------------------------------------------------------------
-# STEP 9: UPDATE README.md AUTOMATICALLY
-# -------------------------------------------------------------------
-# This step adds the plot images to your README.md file so they show up on GitHub.
-
-readme_path <- "README.md"
-plot1_file <- "plot_top20_capacity.png"
-plot2_file <- "plot_top20_intensity.png"
-
-# Check if README exists
-if (file.exists(readme_path)) {
-  
-  # Read the current content of the README
-  readme_content <- readLines(readme_path)
-  
-  # Define the markdown text for the images
-  img_markdown <- c(
-    "",
-    "## 📊 Preliminary Results (Top 20)",
-    "",
-    paste0("![Top 20 Capacity](plots/", plot1_file, ")"),
-    "",
-    paste0("![Top 20 Intensity](plots/", plot2_file, ")")
-  )
-  
-  # Check if the images are already in the file to avoid duplicates
-  if (!any(grepl(plot1_file, readme_content))) {
-    
-    # Append the new lines to the file
-    cat(img_markdown, file = readme_path, sep = "\n", append = TRUE)
-    print("Success: Plots added to README.md")
-    
-  } else {
-    print("Info: Plots are already present in README.md. Skipping.")
-  }
-  
-} else {
-  print("Warning: README.md not found. Could not add plots.")
-}
+# Note: STEP 9 (README Auto-Update) has been permanently removed as requested.

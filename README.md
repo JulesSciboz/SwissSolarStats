@@ -47,6 +47,11 @@ All datasets used in this study are publicly available via the Swiss Open Govern
         Action: Download the CSV (LV95 format).
 
         Save as: AMTOVZ_CSV_LV95.csv
+        
+        
+#### Live API Integration (ElCom Data)
+
+This script utilizes the official Swiss Federal Linked Data Service (LINDAS) to automatically query and aggregate historical electricity prices (2013-2023) directly from the Federal Electricity Commission (ElCom) via SPARQL. **No manual download is required for electricity prices.** The script calculates the 10-year average, the 2023 peak price, and the absolute price shock (Delta) per municipality.
    
    
 ### Step 3: Run the Analysis
