@@ -20,7 +20,11 @@ if(!require("here")) install.packages("here")
 if(!require("httr")) install.packages("httr")
 if(!require("ggplot2")) install.packages("ggplot2")
 if(!require("readxl")) install.packages("readxl")
+if(!require("broom")) install.packages("broom")
+if(!require("stargazer")) install.packages("stargazer")
 
+library(stargazer)
+library(broom)
 library(readxl)
 library(ggplot2)
 library(readr)
@@ -267,8 +271,9 @@ left_green_clean <- elections_df %>%
   summarise(
     Total_Votes = sum(Votes, na.rm = TRUE),
     
-    # BFS Standard-IDs: SP = 3, GPS = 13
-    Left_Green_Votes = sum(Votes[Partei_ID %in% c(3, 13)], na.rm = TRUE),
+  # BFS Standard-IDs: SP = 3, GPS = 13, GLP = 31
+  # Adding 31 pulls the Green Liberals
+    Left_Green_Votes = sum(Votes[Partei_ID %in% c(3, 13, 31)], na.rm = TRUE),
     .groups = "drop"
   ) %>%
   # Berechne den prozentualen Anteil (0 bis 100%)
@@ -277,6 +282,67 @@ left_green_clean <- elections_df %>%
 
 print(paste("Left-Green voting share calculated for", nrow(left_green_clean), "municipalities."))
 
+
+# -------------------------------------------------------------------
+# STEP 4.9: IMPORT SOLAR IRRADIATION (Control Variable)
+# -------------------------------------------------------------------
+print("Reading Solar Irradiation Excel file...")
+
+irradiation_file <- here("data", "raw", "solar_radiation_per_municipality.xlsx")
+
+# 1. Sicherheitscheck
+if (!file.exists(irradiation_file)) {
+  stop(paste("FEHLER: Datei nicht gefunden unter", irradiation_file))
+}
+
+# 2. Daten einlesen und bereinigen
+irradiation_raw <- read_excel(irradiation_file)
+
+irradiation_clean <- irradiation_raw %>%
+  mutate(
+    BFS_Nr = as.numeric(bfs_nummer),
+    # Wir nutzen direkt die kWh/m2 Spalte als unsere Kontrollvariable
+    Irradiation_kWh_m2 = as.numeric(radiation_kWh_m2) 
+  ) %>%
+  select(BFS_Nr, Irradiation_kWh_m2)
+
+print(paste("Solar irradiation data loaded for", nrow(irradiation_clean), "municipalities."))
+
+# -------------------------------------------------------------------
+# STEP 4.10: CALCULATE PEER EFFECTS (Baseline PV Density < 2018)
+# -------------------------------------------------------------------
+print("Calculating 2017 Baseline PV Density for Peer Effects...")
+
+library(lubridate)
+
+# 1. Filter the raw BFE dataset & Match PostCodes to BFS_Nr
+baseline_plants <- all_plants_raw %>%
+  mutate(
+    Commissioning_Date = as.Date(BeginningOfOperation),
+    PostCode = as.numeric(PostCode) 
+  ) %>%
+  filter(Commissioning_Date < as.Date("2018-01-01")) %>%
+  # Use your Swisstopo lookup to get the real BFS_Nr!
+  left_join(ortschaften_lookup, by = c("PostCode" = "PLZ")) %>%
+  filter(!is.na(BFS_Nr))
+
+# 2. Count the total number of physical installations per municipality
+baseline_counts <- baseline_plants %>%
+  group_by(BFS_Nr) %>%
+  summarise(
+    Baseline_Installations_2017 = n(),
+    .groups = "drop"
+  )
+
+# 3. Calculate Density (Installations per 1,000 inhabitants in 2017)
+peer_effects_clean <- baseline_counts %>%
+  left_join(population_clean, by = "BFS_Nr") %>%
+  mutate(
+    Baseline_PV_Density_2017 = (Baseline_Installations_2017 / Population) * 1000
+  ) %>%
+  select(BFS_Nr, Baseline_PV_Density_2017)
+
+print(paste("Peer effects baseline calculated for", nrow(peer_effects_clean), "municipalities."))
 # -------------------------------------------------------------------
 # STEP 5: JOIN EVERYTHING & CALCULATE DEPENDENT VARIABLES
 # -------------------------------------------------------------------
@@ -299,13 +365,18 @@ solar_agg_commune <- solar_mapped %>%
     .groups = "drop"
   )
 
-# 5c. Join with Population, ElCom Data & Calculate Metrics
+# 5c. Join with Population, ElCom Data, Voting Data, Elections, Irradiation & Peer Effects
 final_dataset <- solar_agg_commune %>%
   left_join(population_clean, by = "BFS_Nr") %>%
-  left_join(elcom_clean, by = "BFS_Nr") %>%   # <--- h1a
-  left_join(green_index_clean, by = "BFS_Nr") %>% # <--- h2a
-  left_join(left_green_clean, by = "BFS_Nr") %>%  # <--- h3a
+  left_join(elcom_clean, by = "BFS_Nr") %>%         
+  left_join(green_index_clean, by = "BFS_Nr") %>%   
+  left_join(left_green_clean, by = "BFS_Nr") %>%    
+  left_join(irradiation_clean, by = "BFS_Nr") %>%   
+  left_join(peer_effects_clean, by = "BFS_Nr") %>%  
   mutate(
+    # Use coalesce to replace NAs with 0 (does not require tidyr package)
+    Baseline_PV_Density_2017 = coalesce(Baseline_PV_Density_2017, 0),
+    
     # DV 1: New Capacity Density (Watts per Capita)
     New_Watts_per_Capita = (New_Solar_kW * 1000) / Population,
     
@@ -313,10 +384,10 @@ final_dataset <- solar_agg_commune %>%
     Adoption_Intensity = (New_Installations_Count / Population) * 1000
   ) %>%
   filter(!is.na(Population)) %>%
-  # Optional: Filter out tiny communes to avoid outliers (e.g., Pop < 100)
-  filter(Population > 100)
+  filter(Population > 100) %>%
+  filter(complete.cases(.))
 
-print("Final dataset created.")
+print(paste("Final dataset created with", nrow(final_dataset), "complete municipalities."))
 glimpse(final_dataset)
 
 # -------------------------------------------------------------------
@@ -332,36 +403,85 @@ print("Analysis complete. Final regression dataset saved to data/processed/.")
 saveRDS(final_dataset, here("data", "processed", "solar_growth_2018_2024_final.rds"))
 print("Analysis complete. Final dataset saved to data/processed/.")
 
+print("Generating Descriptive Statistics...")
+
+desc_data <- final_dataset %>%
+  select(
+    New_Watts_per_Capita,
+    Delta_23_13,
+    Green_Index,
+    Left_Green_Share_2023,
+    Irradiation_kWh_m2,     # <--- Added to Descriptives
+    Population
+  ) %>%
+  as.data.frame()
+
+# Deskriptive Tabelle in der Konsole ausgeben
+stargazer(
+  desc_data, 
+  type = "text", 
+  title = "Table 1: Descriptive Statistics",
+  digits = 2,
+  covariate.labels = c(
+    "New PV Capacity (Watts/Capita)",
+    "Price Shock (Delta 2013-2023)",
+    "Green Voting Index (%)",
+    "Left-Green Party Share (%)",
+    "Solar Irradiation (kWh/m2)",
+    "Population"
+  )
+)
+
+# Deskriptive Tabelle als Word-Datei speichern
+stargazer(
+  desc_data, 
+  type = "html", 
+  out = here("data", "processed", "Table1_Descriptive_Statistics.doc"),
+  title = "Table 1: Descriptive Statistics",
+  digits = 2,
+  covariate.labels = c(
+    "New PV Capacity (Watts/Capita)",
+    "Price Shock (Delta 2013-2023)",
+    "Green Voting Index (%)",
+    "Left-Green Party Share (%)",
+    "Solar Irradiation (kWh/m2)",
+    "Population"
+  )
+)
 
 # -------------------------------------------------------------------
-# STEP 8: MULTIVARIATE REGRESSION & COEFFICIENT PLOT
+# STEP 8: MULTIVARIATE REGRESSION, COEFFICIENT PLOT & ACADEMIC TABLE
 # -------------------------------------------------------------------
-if(!require("broom")) install.packages("broom")
-library(broom)
+library(stringr)
 
-print("Running Multivariate Regression Model...")
+print("Running Advanced Multivariate Regression Model (No Fixed Effects)...")
 
 # 1. Run the OLS Regression
 # DV: New Watts per Capita
-# IVs: Price Shock (H1), Green Index (H2), Left-Green Party Share (H3), Control: log(Population)
-model_1 <- lm(
-  New_Watts_per_Capita ~ Delta_23_13 + Green_Index + Left_Green_Share_2023 + log(Population), 
+# IVs: Price Shock, Green Index, Left-Green Party Share
+# Controls: Solar Irradiation, Baseline PV (Peer Effects), log(Population)
+model_advanced <- lm(
+  New_Watts_per_Capita ~ Delta_23_13 + Green_Index + Left_Green_Share_2023 + 
+    Irradiation_kWh_m2 + Baseline_PV_Density_2017 + 
+    log(Population), 
   data = final_dataset
 )
 
 # Print the classic summary to the console so you can see the p-values
-print(summary(model_1))
+print(summary(model_advanced))
 
 # 2. Prepare data for the Coefficient Plot using 'broom'
-# This extracts the estimates and 95% confidence intervals
-model_results <- tidy(model_1, conf.int = TRUE) %>%
-  filter(term != "(Intercept)") %>% # We remove the intercept as it skews the plot scale
+model_results <- tidy(model_advanced, conf.int = TRUE) %>%
+  # Remove the intercept to keep the plot scale readable
+  filter(term != "(Intercept)") %>% 
   mutate(
     # Rename variables for a beautiful plot
     term = case_when(
       term == "Delta_23_13" ~ "Price Shock (Delta 2013-2023)",
       term == "Green_Index" ~ "Green Voting Index (Referendums)",
-      term == "Left_Green_Share_2023" ~ "Left-Green Party Share (Elections)",
+      term == "Left_Green_Share_2023" ~ "Eco-Left Party Share (Elections)",
+      term == "Irradiation_kWh_m2" ~ "Solar Irradiation (kWh/m2)",
+      term == "Baseline_PV_Density_2017" ~ "Baseline PV Density 2017 (Peer Effects)",
       term == "log(Population)" ~ "Population (Log)",
       TRUE ~ term
     )
@@ -379,7 +499,7 @@ coef_plot <- ggplot(model_results, aes(x = estimate, y = reorder(term, estimate)
   # Labels and styling
   labs(
     title = "Predictors of Solar Adoption in Swiss Municipalities",
-    subtitle = "Dependent Variable: New PV Capacity (Watts per Capita) | 95% Confidence Intervals",
+    subtitle = "Dependent Variable: New PV Capacity (Watts per Capita) | Peer Effects Model",
     x = "Estimated Effect on Solar Capacity (Watts per Capita)",
     y = ""
   ) +
@@ -392,43 +512,21 @@ coef_plot <- ggplot(model_results, aes(x = estimate, y = reorder(term, estimate)
 # 4. Display the plot
 print(coef_plot)
 
-# -------------------------------------------------------------------
-# STEP 9: ACADEMIC REGRESSION TABLE
-# -------------------------------------------------------------------
-if(!require("stargazer")) install.packages("stargazer")
-library(stargazer)
+# 5. Create Academic Regression Table
+print("Generating Academic Regression Table with Peer Effects...")
 
-print("Generating standard academic regression table...")
-
-# 1. Print to the Console (for quick reading)
+# Print to Console
 stargazer(
-  model_1,
+  model_advanced,
   type = "text", 
-  title = "Table 1: Predictors of Solar Adoption (2018-2024)",
+  title = "Table 3: Predictors of Solar Adoption (Peer Effects)",
   dep.var.labels = c("New PV Capacity (Watts/Capita)"),
   covariate.labels = c(
     "Price Shock (Delta 2013-2023)",
     "Green Voting Index",
-    "Left-Green Party Share",
-    "Population (Log)",
-    "Constant"
-  ),
-  keep.stat = c("n", "rsq", "adj.rsq", "f"), # Shows N, R-squared, and F-statistic
-  digits = 2,
-  star.cutoffs = c(0.05, 0.01, 0.001) # Standard significance stars (* p<0.05, ** p<0.01, *** p<0.001)
-)
-
-# 2. Save to a Word-compatible document (for your paper)
-stargazer(
-  model_1,
-  type = "html", # Saving as HTML inside a .doc file makes it open perfectly in MS Word
-  out = here("data", "processed", "Table1_Regression_Results.doc"),
-  title = "Table 1: Predictors of Solar Adoption (2018-2024)",
-  dep.var.labels = c("New PV Capacity (Watts/Capita)"),
-  covariate.labels = c(
-    "Price Shock (Delta 2013-2023)",
-    "Green Voting Index",
-    "Left-Green Party Share",
+    "Eco-Left Party Share",
+    "Solar Irradiation (kWh/m2)",
+    "Baseline PV Density 2017 (Peer Effects)", 
     "Population (Log)",
     "Constant"
   ),
@@ -437,5 +535,25 @@ stargazer(
   star.cutoffs = c(0.05, 0.01, 0.001)
 )
 
-print("Success! Academic table printed to console and saved to data/processed/Table1_Regression_Results.doc")
+# Save to Word Document
+stargazer(
+  model_advanced,
+  type = "html", 
+  out = here("data", "processed", "Table3_Advanced_Regression.doc"),
+  title = "Table 3: Predictors of Solar Adoption (Peer Effects)",
+  dep.var.labels = c("New PV Capacity (Watts/Capita)"),
+  covariate.labels = c(
+    "Price Shock (Delta 2013-2023)",
+    "Green Voting Index",
+    "Eco-Left Party Share",
+    "Solar Irradiation (kWh/m2)",
+    "Baseline PV Density 2017 (Peer Effects)",
+    "Population (Log)",
+    "Constant"
+  ),
+  keep.stat = c("n", "rsq", "adj.rsq", "f"),
+  digits = 2,
+  star.cutoffs = c(0.05, 0.01, 0.001)
+)
 
+print("Success! Plot rendered and Table 3 saved.")
