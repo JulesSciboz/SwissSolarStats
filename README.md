@@ -1,14 +1,16 @@
-🇨🇭 Swiss Solar Growth Analysis (2018–2024)
+# 🇨🇭 Swiss Solar Growth Analysis (2018–2024)
 
 This project analyzes the determinants of photovoltaic (PV) adoption across Swiss municipalities during the implementation phase of the Energy Strategy 2050.
 
 By merging administrative energy data with socio-economic indicators, physical solar irradiation, and cantonal policy frameworks, we isolate the growth of solar capacity between 2018 and 2024. The ultimate regression model explicitly tests the impact of federal electricity price shocks (H1), green political ideology (H2/H3), structural constraints like the "Urban Renter Paradox", local peer effects, and explicit cantonal policies (H4).
-🚀 How to Reproduce This Study
+
+## 🚀 How to Reproduce This Study
 
 To ensure full reproducibility across different operating systems (Windows, Mac, Linux) while respecting GitHub's file size limits, this project uses the here package for relative file paths and excludes the massive raw data files from the repository.
 
 Anyone can replicate this analysis by following these steps:
-Step 1: Clone and Setup
+
+### Step 1: Clone and Setup
 
     Clone this repository to your local machine.
 
@@ -25,7 +27,7 @@ Step 1: Clone and Setup
     ├── scripts/
     └── README.md
 
-Step 2: Download the Raw Data
+### Step 2: Download the Raw Data
 
 Because GitHub has a 100MB file size limit, the massive Swiss energy and geographic datasets cannot be hosted directly in this repository.
 Note: The lightweight municipal population dataset (px-x-0102020000_201.json) is already bundled in the data/raw/ folder for your convenience!
@@ -34,7 +36,7 @@ All datasets used in this study are publicly available via the Swiss Open Govern
 
 Download the following files and place them exactly as named into the data/raw/ folder:
 
-    1. Federal Office of Energy (BFE) - Solar Installations
+1. Federal Office of Energy (BFE) - Solar Installations
 
         Source: [Elektrizitätsproduktionsanlagen](https://opendata.swiss/de/dataset/elektrizitatsproduktionsanlagen)
 
@@ -66,13 +68,13 @@ Download the following files and place them exactly as named into the data/raw/ 
 
 4. BFS - National Council Elections (H3: Left-Green Strength)
 
-    Source: [Link to BFS Elections Database](https://www.bfs.admin.ch/bfs/fr/home/statistiques/catalogue.assetdetail.28945919.html)
+      Source: [Link to BFS Elections Database](https://www.bfs.admin.ch/bfs/fr/home/statistiques/catalogue.assetdetail.28945919.html)
 
-    Action: Download the 2023 election results (NDJSON format).
+      Action: Download the 2023 election results (NDJSON format).
+  
+      Save as: NRW_2023_Dataset.json
 
-    Save as: NRW_2023_Dataset.json
-
-    Note: The script parses the JSON to extract the combined vote share of the SP and GPS parties per municipality.
+      Note: The script parses the JSON to extract the combined vote share of the SP and GPS parties per municipality.
     
 5. Physical Solar Irradiation (Control Variable)
 
@@ -92,9 +94,10 @@ Download the following files and place them exactly as named into the data/raw/ 
 
         Note: This provides the critical controls for the "Urban Renter Paradox" (Share of Single-Family Homes), Municipal Wealth, and Cantonal Policies (Subsidies, Tax Deductions, and Regulatory Friction).
 
-Live API Integration (ElCom Data)
+### Live API Integration (ElCom Data)
 
 This script utilizes the official Swiss Federal Linked Data Service (LINDAS) to automatically query and aggregate historical electricity prices (2013-2023) directly from the Federal Electricity Commission (ElCom) via SPARQL. No manual download is required for electricity prices. The script calculates the 10-year average, the 2023 peak price, and the absolute price shock (Delta) per municipality.
-Step 3: Run the Analysis
 
-Open SwissSolarStats.Rproj in RStudio and run the main script. The script will output the final descriptive statistics and the ultimate multivariate OLS regression tables (controlling for structural constraints and peer effects) directly into the data/processed/ folder as perfectly formatted Word documents.
+### Step 3: Run the Analysis
+
+Open SwissSolarStats.Rproj in RStudio and run the main script. The script will output the final descriptive statistics and the multivariate OLS regression tables (controlling for structural constraints and peer effects) directly into the data/processed/ folder as perfectly formatted Word documents.
