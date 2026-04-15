@@ -32,33 +32,33 @@ if(!require("stargazer")) install.packages("stargazer")
 if(!require("tidyr")) install.packages("tidyr")
 if(!require("patchwork")) install.packages("patchwork")
 if(!require("car")) install.packages("car")
+if(!require("lmtest")) install.packages("lmtest")
+if(!require("sandwich")) install.packages("sandwich")
 
-
-
-# 1B. Load Libraries into the Environment
 # --- Academic Formatting & Visualization ---
-library(stargazer) # Generates publication-ready regression tables (HTML/LaTeX/Text)
-library(broom)     # Converts messy regression model objects into tidy data frames
-library(ggplot2)   # The standard package for creating advanced data visualizations
-library(tidyr)     # TC.... 
-library(patchwork) # TC...
+library(stargazer) # Generates publication-ready regression tables
+library(broom)     # Converts regression objects into tidy data frames for plotting
+library(ggplot2)   # The gold standard for data visualization
+library(tidyr)     # Essential for data reshaping (pivot_longer/wider)
+library(patchwork) # Allows combining multiple plots into one layout
+library(forcats)   # Handles factor levels for sorting labels in plots
 
-
-# --- Data Import ---
-library(readr)     # Fast and friendly way to read flat files (CSV, TSV)
-library(readxl)    # Reads Microsoft Excel files (.xls and .xlsx)
-library(jsonlite)  # Parses JSON data (used for the BFS election and population data)
-library(httr)      # Handles HTTP requests for interacting with web APIs (LINDAS)
+# --- Data Import & API Interaction ---
+library(readr)     # Fast reading of flat files (CSV, TSV)
+library(readxl)    # Reads Microsoft Excel files (.xls, .xlsx)
+library(jsonlite)  # Parses JSON data from BFS/Federal sources
+library(httr)      # Handles HTTP requests for LINDAS SPARQL API
+library(here)      # Manages project-relative file paths (safe for collaboration)
 
 # --- Data Wrangling & Manipulation ---
-library(dplyr)     # Core package for data manipulation (filter, mutate, select, join)
-library(lubridate) # Simplifies working with dates and times (used for commissioning dates)
-library(stringr)   # Provides tools for cleaning and manipulating text/character strings
-library(car)       # Required for VIF (Variance Inflation Factor) multicollinearity tests
+library(dplyr)     # Core Swiss-army knife for data manipulation
+library(lubridate) # Handles dates (useful for solar commissioning timelines)
+library(stringr)   # Tools for cleaning text (essential for SPARQL response cleaning)
 
-
-# --- Project Management ---
-library(here)      # Manages file paths dynamically relative to the project root
+# --- Econometrics & Robustness ---
+library(car)       # Used for VIF (Multicollinearity) diagnostics
+library(sandwich)  # Required for Clustered Standard Error calculations (vcovCL)
+library(lmtest)    # Used for coeftest() to apply robust/clustered errors to results
 
 # 1C. Establish Standard Directory Structure
 # The 'here' package anchors the working directory to the project root.
@@ -697,9 +697,8 @@ desc_data <- final_dataset %>%
     # DEPENDENT VARIABLE
     New_Watts_per_Capita,
     
-    # H1: ECONOMIC (Price & Profitability Proxy)
+    # H1: ECONOMIC (Price Effect)
     Peak_Price_2023,          # H1.A
-    is_local_coop,            # H1.B (Proxy for FiT/Profitability)
     
     # H2: SOCIAL (Peer Effects / Path Dependency)
     Baseline_PV_Density_2017, # The "Neighbor Effect"
@@ -707,10 +706,11 @@ desc_data <- final_dataset %>%
     # H3: POLITICAL (Ideology)
     Left_Green_Share_2023,    
     
-    # CONTROLS (Sector Coupling & Demographics)
-    Heat_Pump_Share,          
-    Taxable_Income,           
-    Population_Density        
+    # CONTROLS (Environmental, Sector Coupling & Demographics)
+    Irradiation_kWh_m2,       # Environmental Control
+    Heat_Pump_Share,          # Technology Control
+    Taxable_Income,           # Socio-economic Control
+    Population_Density        # Geographic Control
   ) %>%
   as.data.frame()
 
@@ -718,9 +718,9 @@ desc_data <- final_dataset %>%
 final_labels <- c(
   "New PV Capacity (Watts/Capita)",           # Dependent
   "Peak Elec. Price 2023 (Rp/kWh) [H1.A]",    # H1
-  "Community Utility Proxy (1/0) [H1.B]",     # H1
   "Baseline PV Density 2017 [H2]",            # H2
   "Left-Green Party Share (%) [H3]",          # H3
+  "Solar Irradiation (kWh/m2)",               # Environmental Control
   "Heat Pump Share (%)",                      # Control
   "Taxable Income (CHF/Taxpayer)",            # Control
   "Population Density (Inh./km2)"             # Control
@@ -746,46 +746,44 @@ stargazer(
 )
 
 # -------------------------------------------------------------------
-# STEP 7.1: FULL STRIP PLOTS
+# STEP 7.1: BIVARIATE ANALYSIS (Hypothesis Scatterplots)
 # -------------------------------------------------------------------
-print("Generating Full Strip Plots for outlier detection...")
+print("Generating Continuous Hypothesis Scatterplots...")
 
-# 1. Prepare data with Hypothesis tags and Controls
-strip_data_full <- final_dataset %>%
-  select(
-    `DepVar: New Watts` = New_Watts_per_Capita,
-    `H1: Peak Price` = Peak_Price_2023, 
-    `H2: Baseline 2017` = Baseline_PV_Density_2017, 
-    `H3: Left-Green Share` = Left_Green_Share_2023,
-    `Ctrl: Heat Pumps` = Heat_Pump_Share,
-    `Ctrl: Income` = Taxable_Income,
-    `Ctrl: Pop Density` = Population_Density,
-    `Ctrl: Irradiation` = Irradiation_kWh_m2
+scatter_data <- final_dataset %>%
+  mutate(
+    `H1.A: Peak Price 2023` = Peak_Price_2023,
+    `H2: Baseline Density 2017` = Baseline_PV_Density_2017,
+    `H3: Left-Green Share (%)` = Left_Green_Share_2023,
+    `Ctrl: Solar Irradiation` = Irradiation_kWh_m2, # Added Environmental Control
+    `Ctrl: Heat Pump Share` = Heat_Pump_Share,
+    `Ctrl: Taxable Income (Log)` = log(Taxable_Income),
+    `Ctrl: Pop. Density (Log)` = log(Population_Density)
   ) %>%
-  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Value")
+  # H1.B (Community Proxy) is excluded as binary variables do not suit trend lines
+  select(New_Watts_per_Capita, starts_with("H"), starts_with("Ctrl")) %>%
+  pivot_longer(cols = -New_Watts_per_Capita, names_to = "Predictor", values_to = "Value")
 
-# 2. Render the Multi-Facet Plot
-strip_plot_full <- ggplot(strip_data_full, aes(x = Variable, y = Value)) +
-  # Jittered dots represent each unique Swiss municipality
-  geom_jitter(width = 0.2, alpha = 0.25, color = "#34495e", size = 0.6) +
-  # Boxplot provides the "Anchor" (Median and Interquartile Range)
-  geom_boxplot(outlier.shape = NA, fill = "#e67e22", alpha = 0.5, color = "#d35400", width = 0.4) +
-  facet_wrap(~ Variable, scales = "free", ncol = 4) +
+scatter_plot <- ggplot(scatter_data, aes(x = Value, y = New_Watts_per_Capita)) +
+  # Using alpha for density to handle the high N of Swiss municipalities
+  geom_point(alpha = 0.2, color = "#2ecc71", size = 1) + 
+  # Linear trend line (Red) to visualize the correlation
+  geom_smooth(method = "lm", color = "#c0392b", fill = "#e74c3c", alpha = 0.2) +
+  facet_wrap(~ Predictor, scales = "free_x", ncol = 4) + # Adjusted to 4 columns for balance
   theme_minimal() +
   labs(
-    title = "Structural Audit: Distribution of All Model Variables",
-    subtitle = "Spotting 'Funny' Data: Extreme vertical outliers indicate potential leverage points.",
-    x = "",
-    y = "Absolute Value"
+    title = "Structural Correlation Analysis: Bivariate Trends in Solar Adoption",
+    subtitle = "Visualizing Individual Hypothesis [H1-H3] and Environmental Drivers without Covariate Control",
+    x = "Independent Variable (Unit-Specific or Log Scale)",
+    y = "New PV Capacity (Watts/Capita)"
   ) +
   theme(
-    axis.text.x = element_blank(),
     strip.text = element_text(face = "bold", size = 9),
-    panel.grid.major.x = element_blank()
+    panel.grid.minor = element_blank()
   )
 
-print(strip_plot_full)
-ggsave(here("plots", "EDA_3_Strip_Plots_Full.png"), plot = strip_plot_full, width = 14, height = 10, dpi = 300)
+print(scatter_plot)
+ggsave(here("plots", "EDA_2_Scatterplots_Final.png"), plot = scatter_plot, width = 14, height = 8, dpi = 300)
 
 # -------------------------------------------------------------------
 # STEP 7.2: EXPLORATORY DATA ANALYSIS (Final Design Version)
@@ -796,8 +794,7 @@ hist_clean_dataset <- final_dataset %>%
   # 1. Create clean, labeled, and logged versions mapped to Hypotheses
   mutate(
     `Dep. Var: New PV Watts/Capita` = New_Watts_per_Capita,
-    `H1.A: Peak Price 2023` = Peak_Price_2023,
-    `H1.B: Community Utility Proxy` = is_local_coop,
+    `H1: Peak Price 2023` = Peak_Price_2023,
     `H2: Baseline PV Density 2017` = Baseline_PV_Density_2017,
     `H3: Left-Green Party Share` = Left_Green_Share_2023,
     `Control: Heat Pump Share` = Heat_Pump_Share,
@@ -815,12 +812,12 @@ hist_clean_dataset <- final_dataset %>%
 # --- THE PLOT ---
 hist_plot <- ggplot(hist_clean_dataset, aes(x = Value)) +
   geom_histogram(bins = 30, fill = "#2c3e50", color = "white", alpha = 0.8) +
-  # Use facet_wrap with 3 columns to keep the H-categories somewhat grouped
+  # Scales="free" is critical because units range from 0-1 (log) to 1000s (Watts)
   facet_wrap(~ Variable, scales = "free", ncol = 3) + 
   theme_minimal() +
   labs(
     title = "Distribution of Primary and Control Variables across Swiss Municipalities",
-    subtitle = "Visualizing Hypothesis-Driven Variables [H1-H3] and Log-Transformed Controls",
+    subtitle = "Visualizing Hypothesis-Driven Variables [H1-H3] and Environmental/Structural Controls",
     x = "Value / Log Value",
     y = "Count of Municipalities"
   ) +
@@ -834,137 +831,115 @@ print(hist_plot)
 ggsave(here("plots", "EDA_1_Histograms_Final.png"), plot = hist_plot, width = 12, height = 10, dpi = 300)
 
 # -------------------------------------------------------------------
-# STEP 8: FINAL REGRESSION MODELS (H1.A, H1.B, H2, H3)
+# STEP 8: FINAL PEAK PRICE REGRESSION (H1, H2, H3 + Controls)
 # -------------------------------------------------------------------
-print("Running Final Multivariate Regression Models...")
+print("Running Final Optimized Peak Price Model...")
 
-# 1. Run the OLS Regressions
-# Note: log(Taxable_Income) and log(Population_Density) are permanent 
-# to normalize distributions and handle extreme Swiss outliers.
-
-# MODEL 1: Optimized Clean Model (Testing H1.A via Price Delta)
-model_clean <- lm(
-  New_Watts_per_Capita ~ Delta_23_13 + is_local_coop + Left_Green_Share_2023 + 
-    Baseline_PV_Density_2017 + Heat_Pump_Share + 
+# 1. The Core Regression
+# We add Irradiation here to control for geographic solar potential.
+model_final <- lm(
+  New_Watts_per_Capita ~ Peak_Price_2023 + is_local_coop + 
+    Baseline_PV_Density_2017 + Left_Green_Share_2023 + 
+    Heat_Pump_Share + Irradiation_kWh_m2 + 
     log(Taxable_Income) + log(Population_Density) + as.factor(Canton), 
   data = final_dataset
 )
 
-# MODEL 2: The "Full" Research Design Model (Includes Multicollinear Controls)
-model_full <- lm(
-  New_Watts_per_Capita ~ Delta_23_13 + is_local_coop + Left_Green_Share_2023 + 
-    Baseline_PV_Density_2017 + Heat_Pump_Share + 
-    log(Taxable_Income) + log(Population_Density) + 
-    Green_Index + Irradiation_kWh_m2 + as.factor(Canton), 
-  data = final_dataset
-)
+# 2. Robustness: Calculate Clustered Standard Errors
+# Clustered by Utility Provider (Operator_Name)
+robust_se <- list(sqrt(diag(vcovCL(model_final, cluster = ~Operator_Name))))
 
-# MODEL 3: The "Peak Price" Model (Testing H1.A Scare Factor + H1.B Proxy)
-# This is our strongest model based on previous console tests.
-model_peak <- lm(
-  New_Watts_per_Capita ~ Peak_Price_2023 + is_local_coop + Left_Green_Share_2023 + 
-    Baseline_PV_Density_2017 + Heat_Pump_Share + 
-    log(Taxable_Income) + log(Population_Density) + as.factor(Canton), 
-  data = final_dataset
-)
-
-# -------------------------------------------------------------------
-# STEP 8.1: DIAGNOSTICS (Multicollinearity / VIF)
-# -------------------------------------------------------------------
-print("Checking for Multicollinearity (VIF) on Optimized Model...")
-vif_results <- vif(model_clean)
-print(vif_results)
-
-# 2. Prepare Data for the Plot (Plotting the Peak Price Model)
-model_results <- tidy(model_peak, conf.int = TRUE) %>%
+# 3. Prepare Data for the Plot
+model_results <- tidy(model_final, conf.int = TRUE) %>%
   filter(term != "(Intercept)" & !str_detect(term, "as.factor\\(Canton\\)")) %>% 
   mutate(
     term = case_when(
-      term == "Peak_Price_2023" ~ "Peak Price 2023 [H1.A]",
+      term == "Peak_Price_2023" ~ "Peak Elec. Price 2023 [H1.A]",
       term == "is_local_coop" ~ "Community Utility Proxy [H1.B]",
       term == "Baseline_PV_Density_2017" ~ "Baseline PV Density 2017 [H2]",
       term == "Left_Green_Share_2023" ~ "Left-Green Party Share [H3]",
-      term == "Heat_Pump_Share" ~ "Control: Heat Pump Share",
+      term == "Heat_Pump_Share" ~ "Heat Pump Share (Sector Coupling)",
+      term == "Irradiation_kWh_m2" ~ "Control: Solar Irradiation",
       term == "log(Taxable_Income)" ~ "Control: Taxable Income (Log)",
       term == "log(Population_Density)" ~ "Control: Population Density (Log)",
       TRUE ~ term
     )
   ) %>%
-  # --- SORTING FOR THE PLOT ---
-  # Force Hypothesis variables to the top, Controls to the bottom.
+  # Reverse levels for plot hierarchy: Hypotheses on top, Controls on bottom
   mutate(term = factor(term, levels = rev(c(
-    "Peak Price 2023 [H1.A]",
+    "Peak Elec. Price 2023 [H1.A]",
     "Community Utility Proxy [H1.B]",
     "Baseline PV Density 2017 [H2]",
     "Left-Green Party Share [H3]",
-    "Control: Heat Pump Share",
-    "Control: Population Density (Log)",
-    "Control: Taxable Income (Log)"
+    "Control: Heat Pump Share (Sector Coupling)",
+    "Control: Solar Irradiation",
+    "Control: Taxable Income (Log)",
+    "Control: Population Density (Log)"
   ))))
 
-# 3. Render the Coefficient Forest Plot
+# 4. Render Coefficient Plot
 coef_plot <- ggplot(model_results, aes(x = estimate, y = term)) +
   geom_vline(xintercept = 0, color = "red", linetype = "dashed", linewidth = 1) +
   geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, color = "#2c3e50", linewidth = 1) +
   geom_point(size = 4, color = "#e67e22") +
-  # Add numeric labels to dots to ensure clarity despite axis scaling
-  geom_text(aes(label = round(estimate, 1)), vjust = -1.5, size = 3) +
+  geom_text(aes(label = round(estimate, 1)), vjust = -1.5, size = 3, fontface = "bold") +
   labs(
-    title = "Predictors of Swiss Solar Adoption (Peak Price Model)",
-    subtitle = "Primary Hypotheses [H1-H3] vs. Structural Controls | Cantonal FE Included",
-    x = "Estimated Effect on Solar Capacity (Watts per Capita)",
+    title = "Key Drivers of Swiss Municipal Solar Adoption",
+    subtitle = "Optimized Peak Price Model (Full Controls) | Error Bars: 95% CI",
+    x = "Estimated Effect on New Capacity (Watts per Capita)",
     y = ""
   ) +
   theme_minimal() +
-  theme(
-    axis.text.y = element_text(size = 11, face = "bold"),
-    plot.title = element_text(size = 14, face = "bold")
-  )
+  theme(axis.text.y = element_text(size = 11, face = "bold"))
 
 print(coef_plot)
-ggsave(here("plots", "Final_Regression_Forest_Plot.png"), plot = coef_plot, width = 11, height = 8, dpi = 300)
+ggsave(here("plots", "Final_Regression_Optimized.png"), plot = coef_plot, width = 11, height = 8, dpi = 300)
 
-# 4. Generate the Academic Table (3-Way Comparison)
-print("Generating Final Academic Regression Table...")
+# -------------------------------------------------------------------
+# STEP 8.1: ACADEMIC TABLE OUTPUT (Console & Word)
+# -------------------------------------------------------------------
 
-table_labels_final <- c(
-  "Price Shock (Delta 2013-2023) [H1.A]",
+# Define the clean labels once to ensure consistency across both outputs
+final_labels_clean <- c(
+  "Peak Elec. Price 2023 (Rp/kWh) [H1.A]",
   "Community Utility Proxy (1/0) [H1.B]",
-  "Left-Green Party Share (%) [H3]",
   "Baseline PV Density 2017 [H2]",
-  "Heat Pump Share (%)",
+  "Left-Green Party Share (%) [H3]",
+  "Control: Heat Pump Share (Sector Coupling)",
+  "Control: Solar Irradiation (kWh/m2)",
   "Control: Taxable Income (Log)",
-  "Control: Population Density (Log)",
-  "Peak Price 2023 (Absolute) [H1.A]",
-  "Green Voting Index (Referendums)",
-  "Control: Solar Irradiation (kWh/m2)"
+  "Control: Population Density (Log)"
 )
 
-# Output for the console (Markdown/Obsidian compatible)
+# 1. Output to Console (Text format for quick verification)
 stargazer(
-  list(model_clean, model_full, model_peak),
-  type = "text", 
-  title = "Table 4: Regression Models for Swiss Municipal Solar Growth (2018-2024)",
-  column.labels = c("Delta Model", "Full Design", "Peak Price Model"),
-  dep.var.labels = c("New PV Capacity (Watts/Capita)"),
-  covariate.labels = table_labels_final,
-  omit = "Canton", 
-  omit.labels = c("Cantonal Fixed Effects Included?"),
-  keep.stat = c("n", "adj.rsq"),
-  digits = 2
-)
-
-# Output for Word
-stargazer(
-  list(model_clean, model_full, model_peak),
-  type = "html", 
-  out = here("data", "processed", "Table4_Solar_Regression_Final.doc"),
-  title = "Table 4: Final Regression Analysis",
-  column.labels = c("Delta Model", "Full Design", "Peak Price Model"),
-  dep.var.labels = c("New PV Capacity (Watts/Capita)"),
-  covariate.labels = table_labels_final,
+  model_final,
+  type = "text",
+  se = robust_se, 
+  title = "Table 4: Regression Analysis of Swiss Municipal Solar Adoption",
+  dep.var.labels = "New PV Capacity (Watts/Capita)",
+  covariate.labels = final_labels_clean,
+  column.labels = "Optimized Model",
   omit = "Canton",
-  omit.labels = c("Cantonal Fixed Effects Included?"),
+  omit.labels = "Cantonal Fixed Effects Included?",
   keep.stat = c("n", "adj.rsq"),
-  digits = 2
+  digits = 2,
+  notes = "Note: Standard errors clustered at the Utility Provider level."
+)
+
+# 2. Output to Word (HTML format saved as .doc)
+stargazer(
+  model_final,
+  type = "html",
+  se = robust_se,
+  out = here("data", "processed", "Table4_Final_Regression_Analysis.doc"), # Saves directly to your folder
+  title = "Table 4: Regression Analysis of Swiss Municipal Solar Adoption",
+  dep.var.labels = "New PV Capacity (Watts/Capita)",
+  covariate.labels = final_labels_clean,
+  column.labels = "2018-2024",
+  omit = "Canton",
+  omit.labels = "Cantonal Fixed Effects Included?",
+  keep.stat = c("n", "adj.rsq"),
+  digits = 2,
+  notes = "Note: Standard errors clustered at the Utility Provider level."
 )
