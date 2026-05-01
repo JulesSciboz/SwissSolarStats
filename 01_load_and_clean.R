@@ -2,266 +2,232 @@
 # STEP 0: SETUP PROJECT ENVIRONMENT
 # ===================================================================
 
-# Check Git status and GitHub remote connection
-# This uses the system() function to pass terminal commands directly to the OS.
-# It ensures that your local environment is correctly linked to your GitHub 
-# repository and reminds you if there are uncommitted changes before running.
-print("Checking local Git status and GitHub remote link...")
+# Verify version control status and remote repository links.
+# Utilizes system commands to ensure the local environment is synchronized 
+# prior to executing the data pipeline.
+print("Checking local Git status and remote repository links...")
 system("git remote -v") 
 system("git status")
 
 # -------------------------------------------------------------------
-# STEP 1: LOAD LIBRARIES
+# STEP 1: LOAD LIBRARIES & INITIALIZE ENVIRONMENT
 # -------------------------------------------------------------------
 
-# 1A. Auto-Install Missing Packages
-# The if(!require(...)) logic checks if a package is installed. 
-# If it is missing, R will automatically install it. This makes the script 
-# highly reproducible on other computers.
-if(!require("readr")) install.packages("readr")
-if(!require("dplyr")) install.packages("dplyr")
-if(!require("lubridate")) install.packages("lubridate")
-if(!require("jsonlite")) install.packages("jsonlite")
-if(!require("stringr")) install.packages("stringr")
-if(!require("here")) install.packages("here")
-if(!require("httr")) install.packages("httr")
-if(!require("ggplot2")) install.packages("ggplot2")
-if(!require("readxl")) install.packages("readxl")
-if(!require("broom")) install.packages("broom")
-if(!require("stargazer")) install.packages("stargazer")
-if(!require("tidyr")) install.packages("tidyr")
-if(!require("patchwork")) install.packages("patchwork")
-if(!require("car")) install.packages("car")
-if(!require("lmtest")) install.packages("lmtest")
-if(!require("sandwich")) install.packages("sandwich")
-
-# --- Academic Formatting & Visualization ---
-library(stargazer) # Generates publication-ready regression tables
-library(broom)     # Converts regression objects into tidy data frames for plotting
-library(ggplot2)   # The gold standard for data visualization
-library(tidyr)     # Essential for data reshaping (pivot_longer/wider)
-library(patchwork) # Allows combining multiple plots into one layout
-library(forcats)   # Handles factor levels for sorting labels in plots
-
-# --- Data Import & API Interaction ---
-library(readr)     # Fast reading of flat files (CSV, TSV)
-library(readxl)    # Reads Microsoft Excel files (.xls, .xlsx)
-library(jsonlite)  # Parses JSON data from BFS/Federal sources
-library(httr)      # Handles HTTP requests for LINDAS SPARQL API
-library(here)      # Manages project-relative file paths (safe for collaboration)
-
-# --- Data Wrangling & Manipulation ---
-library(dplyr)     # Core Swiss-army knife for data manipulation
-library(lubridate) # Handles dates (useful for solar commissioning timelines)
-library(stringr)   # Tools for cleaning text (essential for SPARQL response cleaning)
-
-# --- Econometrics & Robustness ---
-library(car)       # Used for VIF (Multicollinearity) diagnostics
-library(sandwich)  # Required for Clustered Standard Error calculations (vcovCL)
-library(lmtest)    # Used for coeftest() to apply robust/clustered errors to results
-
-# 1C. Establish Standard Directory Structure
-# The 'here' package anchors the working directory to the project root.
-print(paste("Project root automatically set to:", here()))
-
-# Define the folders required for this data pipeline
-dirs_to_create <- c(
-  here("data"),             # Main data folder
-  here("data", "raw"),      # Untouched, original downloaded data files
-  here("data", "processed"),# Cleaned datasets ready for regression analysis
-  here("plots")             # Output folder for generated charts and graphs
+# 1A. Dependency Management
+# Ensures cross-platform reproducibility by verifying and automatically 
+# installing any missing packages required for the analysis.
+packages_required <- c(
+  "readr", "dplyr", "lubridate", "jsonlite", "stringr", "here", 
+  "httr", "ggplot2", "readxl", "broom", "stargazer", "tidyr", 
+  "patchwork", "car", "lmtest", "sandwich", "forcats"
 )
 
-# Loop through the list and create any folders that do not currently exist.
-# This prevents file-path errors later in the script when saving outputs.
+for (pkg in packages_required) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+
+# 1B. Load Libraries into the Environment
+
+# --- Academic Formatting & Visualization ---
+library(stargazer) # Generates publication-ready regression tables (HTML/LaTeX/Text)
+library(broom)     # Converts statistical model objects into tidy data frames
+library(ggplot2)   # Facilitates advanced data visualization
+library(tidyr)     # Provides functions for data reshaping and restructuring
+library(patchwork) # Enables the composition of multiple plots into unified layouts
+library(forcats)   # Handles factor level manipulation for ordered visualizations
+
+# --- Data Import & API Interaction ---
+library(readr)     # Optimizes reading of flat data files (CSV, TSV)
+library(readxl)    # Parses Microsoft Excel files (.xls, .xlsx)
+library(jsonlite)  # Parses JSON data structures from federal data portals
+library(httr)      # Facilitates HTTP requests for LINDAS SPARQL API querying
+library(here)      # Anchors relative file paths to the project root directory
+
+# --- Data Wrangling & Manipulation ---
+library(dplyr)     # Core library for data manipulation and transformation
+library(lubridate) # Standardizes and manipulates date-time objects
+library(stringr)   # Provides regular expression and string manipulation tools
+
+# --- Econometrics & Robustness ---
+library(car)       # Computes Variance Inflation Factors (VIF) for multicollinearity diagnostics
+library(sandwich)  # Computes heteroskedasticity- and autocorrelation-consistent (HAC) standard errors
+library(lmtest)    # Facilitates hypothesis testing and applies clustered standard errors
+
+# 1C. Establish Standard Directory Structure
+# Anchors the working directory to ensure file path integrity across different operating systems.
+print(paste("Project root established at:", here()))
+
+# Define the standard directory architecture required for the data pipeline.
+dirs_to_create <- c(
+  here("data"),             # Root data directory
+  here("data", "raw"),      # Unprocessed, source data files
+  here("data", "processed"),# Cleaned and merged analytical datasets
+  here("plots")             # Output directory for generated visualizations
+)
+
+# Iteratively verify and construct the directory tree to prevent output routing errors.
 for (dir in dirs_to_create) {
   if (!dir.exists(dir)) {
     dir.create(dir)
-    print(paste("Created missing directory:", dir))
+    print(paste("Initialized missing directory:", dir))
   }
 }
 
 # -------------------------------------------------------------------
-# STEP 2: IMPORT BFE SOLAR DATA
+# STEP 2: IMPORT & PROCESS BFE SOLAR INFRASTRUCTURE DATA
 # -------------------------------------------------------------------
 
-# 1. Define File Path
-# Using the here() function ensures that the file path works regardless of 
-# which computer or operating system runs the script. It looks for the "data" 
-# folder relative to the main project directory.
+# 1. Define File Path and Ingest Data
 bfe_file_path <- here("data", "raw", "ElectricityProductionPlant.csv")
-print(paste("Reading BFE file from:", bfe_file_path))
+print(paste("Ingesting BFE infrastructure data from:", bfe_file_path))
 
-# 2. Load the Raw Data
-# read_csv() is much faster than base R's read.csv(). 
-# The locale = locale(encoding = "UTF-8") argument is absolutely critical here 
-# because Swiss data frequently contains special characters (ä, ö, ü, é, à). 
-# Without UTF-8 encoding, town names and addresses will be corrupted.
-all_plants_raw <- read_csv(bfe_file_path, locale = locale(encoding = "UTF-8"))
+# Enforce UTF-8 encoding to preserve Swiss-specific geospatial and administrative characters.
+all_plants_raw <- read_csv(bfe_file_path, locale = locale(encoding = "UTF-8"), show_col_types = FALSE)
 
-# 3. Clean and Filter the Data (The Processing Pipeline)
-# We use the %>% (pipe) operator to pass the data through a sequence of steps.
+# 2. Data Cleaning and Temporal Filtering Pipeline
 solar_growth_clean <- all_plants_raw %>%
   
-  # A. Isolate Solar Power
-  # The BFE dataset contains all types of power plants (hydro, wind, nuclear).
-  # Filtering for "subcat_2" restricts our dataset strictly to Photovoltaic 
-  # installations based on the official BFE catalogue mapping.
+  # A. Isolate Photovoltaic (PV) Installations
+  # Restricts the federal dataset exclusively to solar capacity ("subcat_2") 
+  # per the official BFE technical categorization.
   filter(SubCategory == "subcat_2") %>% 
   
-  # B. Standardize the Date Format
-  # The BeginningOfOperation column might be imported as a generic character string.
-  # We use lubridate's ymd() (Year-Month-Day) function to force it into a 
-  # strict, calculable Date object.
+  # B. Standardize Commissioning Dates
+  # Casts the operational start date to a standard date object for temporal subsetting.
   mutate(operation_date = ymd(BeginningOfOperation)) %>%
   
-  # C. Apply the Study Period Time Boundary
-  # *** CRITICAL FILTER: Start of 2018 to End of 2024 ***
-  # We are only interested in *new* growth during our specific study period,
-  # cutting off historical installations and anything commissioned after 2024.
-  filter(operation_date >= "2018-01-01" & operation_date <= "2024-12-31") %>%
+  # C. Apply Temporal Boundaries (The Study Period)
+  # Isolates new capacity additions strictly commissioned during the 
+  # defined operational window (2018-2024).
+  filter(operation_date >= as.Date("2018-01-01") & operation_date <= as.Date("2024-12-31")) %>%
   
-  # D. Trim the Fat
-  # The raw dataset has dozens of columns we don't need (exact coordinates, etc.).
-  # We select only the PostCode (for spatial mapping) and TotalPower (for our DV).
-  # Dropping the rest saves massive amounts of RAM and speeds up later joins.
+  # D. Feature Selection for Dimensionality Reduction
+  # Retains only the spatial identifier (PostCode) for subsequent administrative 
+  # mapping and the primary dependent variable input (TotalPower).
   select(PostCode, TotalPower)
 
-# Output a diagnostic message to confirm how many installations survived the filter
-print(paste("Solar data loaded. Installations in period:", nrow(solar_growth_clean)))
+# Output diagnostic logging for sample size verification
+print(paste("Temporal filtering complete. New PV installations in study period:", nrow(solar_growth_clean)))
 
 # -------------------------------------------------------------------
-# STEP 3: IMPORT SWISSTOPO (FIXED: PRIORITIZE OFFICIAL INDEX)
+# STEP 3: SPATIAL RESOLUTION (SWISSTOPO POSTAL-TO-MUNICIPAL MAPPING)
 # -------------------------------------------------------------------
-# THE PROBLEM: The Swiss Federal Office of Energy (BFE) solar data only 
-# provides Postal Codes (PLZ). However, in Switzerland, a single PLZ can 
-# physically span across multiple official municipalities (BFS_Nr). 
-# If we don't resolve these 1-to-many relationships, joining the data 
-# will cause massive row duplication.
+# Methodological Note: The BFE solar dataset provides geolocation via 
+# Postal Codes (PLZ). Because a single PLZ can physically overlap multiple 
+# official municipalities (BFS_Nr), a deterministic mapping protocol is 
+# required to prevent Cartesian inflation (row duplication) during data merging.
 
-# 1. Define File Path & Import the Official Directory
+# 1. Ingest Swisstopo Official Locality Directory
 swisstopo_file_path <- here("data", "raw", "AMTOVZ_CSV_LV95.csv")
+print("Ingesting Swisstopo geospatial lookup table...")
 
-print("Reading Swisstopo lookup file...")
-# The official Swiss localities directory is semicolon-separated.
-# Again, UTF-8 is critical to preserve French, German, and Italian names.
-ortschaften_raw <- read_delim(swisstopo_file_path, delim = ";", locale = locale(encoding = "UTF-8"))
+# The official Swiss localities directory utilizes semicolon delimiters.
+ortschaften_raw <- read_delim(swisstopo_file_path, delim = ";", locale = locale(encoding = "UTF-8"), show_col_types = FALSE)
 
-# 2. Build the Bulletproof Lookup Table
-# We use a strict hierarchical sorting logic to decide which BFS_Nr gets 
-# to "claim" a shared PLZ.
+# 2. Construct Deterministic Spatial Lookup Table
 ortschaften_lookup <- ortschaften_raw %>%
   
-  # A. Isolate the necessary geographic identifiers
+  # A. Isolate Required Geospatial Identifiers
   select(PLZ, Ortschaftsname, Gemeindename, `BFS-Nr`, Zusatzziffer, contains("Kanton")) %>% 
-  
-  # B. Standardize column names for seamless joining later
   rename(BFS_Nr = `BFS-Nr`, Canton = contains("Kanton")) %>%
   
-  # C. Create a "Tie-Breaker" Flag
-  # If the specific locality name (Ortschaft) exactly matches the overarching 
-  # municipality name (Gemeinde), it gets a TRUE flag. This usually means it 
-  # is the administrative center of that postal code.
+  # B. Generate Administrative Center Indicator
+  # Evaluates if the specific locality name matches the overarching municipality 
+  # name, serving as a secondary heuristic for assigning shared postal codes.
   mutate(Is_Main_Commune = (Ortschaftsname == Gemeindename)) %>%
   
-  # D. THE FIX: The Hierarchical Sorting Engine
-  # This is the core logic that solves the shared PLZ problem.
-  # 1. Group everything by PLZ first.
-  # 2. Zusatzziffer (Ascending): The Swiss Post assigns a routing index. 
-  #    Lower numbers indicate the primary sorting hub. We trust this official status first.
-  #    (e.g., Fixes the Champoz issue: Valbirse [Zusatzziffer 2] beats Champoz [Zusatzziffer 3])
-  # 3. Is_Main_Commune (Descending): If the routing indices are tied (both are 0), 
-  #    we give priority to the exact name match.
-  #    (e.g., Fixes Mont-Tramelan: Mont-Tramelan [0] beats Tramelan [0] for its specific PLZ)
+  # C. Hierarchical Resolution Logic
+  # Resolves 1-to-many PLZ conflicts using a strict dual-tier sorting protocol:
+  # 1. Primary: Swiss Post routing index (Zusatzziffer, ascending). Lower 
+  #    indices represent the primary logistical hub for that PLZ.
+  # 2. Secondary: Administrative center match (Is_Main_Commune, descending).
   arrange(PLZ, Zusatzziffer, desc(Is_Main_Commune)) %>%
   
-  # E. The Executioner: Lock in the Winner
-  # Because we perfectly sorted the data above, the "correct" municipality for 
-  # every PLZ is sitting at the very top of its group. distinct() scans down the 
-  # PLZ column, keeps the first one it sees, and permanently deletes the losers.
+  # D. Deduplication via Top-Rank Retention
+  # Because the dataset is strictly ordered by the hierarchy above, retaining 
+  # the first distinct observation per PLZ locks in the mathematically optimal match.
   distinct(PLZ, .keep_all = TRUE) %>% 
   
-  # F. Clean up the final output
-  # We only keep the bare minimum needed to translate a PLZ into a BFS_Nr.
+  # E. Final Feature Selection
+  # Retains only the variables necessary for the spatial join.
   select(PLZ, Gemeindename, BFS_Nr, Canton)
 
-# Output a diagnostic message to confirm the logic executed
-print("Swisstopo lookup created (Logic: Index > Name Match).")
+# Output diagnostic logging
+print("Spatial mapping logic executed: Deterministic 1-to-1 PLZ-to-BFS lookup established.")
 
 # -------------------------------------------------------------------
-# STEP 4: IMPORT POPULATION DATA (JSON)
+# STEP 4: DEMOGRAPHIC DATA INGESTION & HIERARCHICAL PARSING (JSON)
 # -------------------------------------------------------------------
-# THE PROBLEM: The BFS STAT-TAB database exports JSON files with a highly 
-# nested, complex hierarchy. Furthermore, Cantons, Districts, and Municipalities 
-# are all crammed into a single column, separated only by text-based symbols 
-# (e.g., "-" for Cantons, ">>" for Districts, and "......" for Municipalities).
+# Methodological Note: The BFS STAT-TAB database exports nested JSON 
+# structures where Cantons, Districts, and Municipalities are combined 
+# within a single string vector. Topological parsing and string extraction 
+# via Regular Expressions (Regex) are required to isolate municipal observations.
 
-# 1. Define File Path & Read the JSON
+# 1. Ingest Federal Population JSON
 json_file_path <- here("data", "raw", "px-x-0102020000_201.json")
+print("Ingesting and parsing Federal Population JSON...")
 
-print("Reading Population JSON...")
-# fromJSON automatically parses the nested lists into an R list object
+# Parse the nested JSON into a standard R list object
 json_data <- fromJSON(json_file_path)
 
-# 2. Extract Data from the Nested JSON Tree
-# The specific key where the geographical hierarchy is stored in the BFS JSON structure
+# 2. Extract Vectors from Nested Hierarchy
+# Target the specific topological key used by the BFS structure
 geo_dim_key <- "Kanton (-) / Bezirk (>>) / Gemeinde (......)"
 
-# Digging down into the JSON branches to extract the raw text labels 
-# (e.g., "......0001 Aeugst am Albis")
+# Isolate spatial labels and corresponding population values
 geo_labels <- json_data$dataset$dimension[[geo_dim_key]]$category$label
-
-# Digging down into the JSON branches to extract the actual numerical population counts
 values_list <- json_data$dataset$value
 
-# 3. Build the Raw Data Frame
-# Combine the two extracted lists into a standard, flat R data frame
+# 3. Construct Intermediate Data Frame
 pop_raw <- data.frame(
   Label = unlist(geo_labels),
   Population = values_list,
   stringsAsFactors = FALSE
 )
 
-# 4. Clean and Extract the Municipality Data (Regex Parsing)
+# 4. Isolate Municipal Observations via Regular Expressions
 population_clean <- pop_raw %>%
   
-  # A. Filter out Cantons and Districts
-  # We ONLY want municipalities. In the BFS format, municipalities always 
-  # start with exactly 6 dots ("......"). str_starts() drops everything else.
+  # A. Filter Administrative Levels
+  # Excludes Cantons ("-") and Districts (">>"). Municipalities are 
+  # strictly denoted by a leading six-dot string ("......").
   filter(str_starts(Label, "\\.\\.\\.\\.\\.\\.")) %>% 
   
-  # B. Extract the BFS_Nr and Name using Regular Expressions (Regex)
+  # B. Extract Standardized Spatial Identifiers
   mutate(
-    # The Regex "(?<=\\.\\.\\.\\.\\.\\.)\\d{4}" uses a "positive lookbehind".
-    # It tells R: "Look for the 6 dots, ignore them, and grab the exactly 
-    # 4 digits (\\d{4}) that come immediately after."
+    # Utilizes a positive lookbehind Regex to extract the exact 4-digit BFS_Nr 
+    # immediately following the municipal prefix.
     BFS_Nr = as.numeric(str_extract(Label, "(?<=\\.\\.\\.\\.\\.\\.)\\d{4}")),
     
-    # We remove the 6 dots and the 4 numbers from the string to isolate the name,
-    # and then use str_trim() to chop off any accidental leading/trailing spaces.
+    # Strip administrative prefixes and leading/trailing whitespace to isolate the string name
     Commune_Name_Pop = str_trim(str_remove(Label, "\\.\\.\\.\\.\\.\\.\\d{4} "))
   ) %>%
   
-  # C. Trim the Fat
-  # We only keep the BFS_Nr (for joining) and the Population (for calculating 
-  # per-capita metrics later). The names are dropped to avoid clutter.
+  # C. Feature Selection
+  # Retains only the identifier for the spatial join and the absolute population 
+  # required for calculating per-capita adoption metrics.
   select(BFS_Nr, Population)
 
-# Output a diagnostic message to confirm the parsing worked
-print("Population data extracted.")
+# Output diagnostic logging
+print("Demographic parsing complete: Municipal population vectors standardized.")
 
 # -------------------------------------------------------------------
-# STEP 4.1: FETCH ELCOM DATA VIA LINDAS API (H1.A & H1.B)
+# STEP 4.1: FETCH ELCOM TARIFF DATA VIA LINDAS API (H1 & CLUSTERING)
 # -------------------------------------------------------------------
-# H1.A (Price Effect): Measured via Peak Price and Delta 2013-2023.
-# H1.B (Profitability/FiT Proxy): Since direct FiT data is unavailable, 
-# we fetch the Network Operator (DSO) name. Small/local operators act as 
-# a proxy for higher feed-in tariffs and community-led adoption.
+# Methodological Note: To model the economic price pressure hypothesis (H1), 
+# this step queries the Swiss Federal Linked Data Service (LINDAS) to extract 
+# historical electricity prices (2013-2023) directly from the Federal Electricity 
+# Commission (ElCom). Additionally, it extracts the Distribution System 
+# Operator (DSO) mapped to each municipality to enable standard error clustering.
 
-print("Fetching ElCom Prices and Operator Names via LINDAS API...")
+print("Executing LINDAS API SPARQL query for ElCom tariff data...")
 
 # 1. Define the SPARQL Query
-# We added dim:operator and schema:name to fetch the utility provider's label.
+# Targets the standard household profile (H4) to ensure price comparability 
+# across all Swiss municipalities.
 sparql_query <- '
 PREFIX schema: <http://schema.org/>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
@@ -294,10 +260,10 @@ WHERE {
 GROUP BY ?bfs_nr
 '
 
-# 2. API Endpoint
+# 2. Configure API Endpoint
 endpoint <- "https://ld.admin.ch/query"
 
-# 3. Make the API Request
+# 3. Execute HTTP POST Request
 response <- POST(
   url = endpoint,
   add_headers(Accept = "text/csv"),
@@ -305,17 +271,20 @@ response <- POST(
   encode = "form"
 )
 
-# 4. Parse Response and Generate H1.B Proxy
+# 4. Parse Response and Cleanse Data
 if (status_code(response) == 200) {
   
+  # Read the raw CSV response
   elcom_raw <- read_csv(content(response, "text", encoding = "UTF-8"), show_col_types = FALSE)
   
   elcom_clean <- elcom_raw %>%
-    # Clean SPARQL RDF tags and quotes from the response
+    # A. Cleanse RDF-specific syntax
+    # The SPARQL response includes RDF type tags (^^<...>) and quotation marks. 
+    # These must be stripped to cast the variables to standard numeric types.
     mutate(across(everything(), ~ str_remove_all(., '\\^\\^<.*>'))) %>%
     mutate(across(everything(), ~ str_remove_all(., '"'))) %>%
     
-    # Coerce to correct types
+    # B. Cast to Correct Data Types
     mutate(
       BFS_Nr = as.numeric(bfs_nr),
       Operator_Name = as.character(Operator_Name),
@@ -324,46 +293,40 @@ if (status_code(response) == 200) {
       Delta_23_13 = as.numeric(Delta_23_13)
     ) %>%
     
-    # --- H1.B PROXY LOGIC ---
-    # We identify local community utilities (coops/communal SI) vs large regional monopolies.
-    # Small local operators are a proxy for higher FiT/community-led profitability.
-    group_by(Operator_Name) %>%
-    mutate(Municipalities_Served = n()) %>%
-    ungroup() %>%
+    # C. Handle Missing Data Artifacts (THE FIX)
+    # The SPARQL BIND function returns 0 if a year is missing. We convert 
+    # these artificial zeros to NA so they do not distort the OLS regression.
     mutate(
-      is_local_coop = ifelse(str_detect(Operator_Name, 
-                                        "Genossenschaft|Services Industriels|Elektra|Communal|Gemeindebetriebe"), 1, 0),
-      is_large_regional = ifelse(Municipalities_Served > 25, 1, 0)
+      Peak_Price_2023 = ifelse(Peak_Price_2023 == 0, NA, Peak_Price_2023),
+      Delta_23_13 = ifelse(Peak_Price_2023 == 0 | Delta_23_13 == 0, NA, Delta_23_13)
     ) %>%
     
-    select(BFS_Nr, Operator_Name, Mean_Price_13_23, Peak_Price_2023, Delta_23_13, is_local_coop, is_large_regional)
+    # D. Feature Selection
+    select(BFS_Nr, Operator_Name, Mean_Price_13_23, Peak_Price_2023, Delta_23_13)
   
-  print(paste("Successfully fetched Price (H1.A) and Operator Proxy (H1.B) for", nrow(elcom_clean), "municipalities."))
+  print(paste("API integration successful: Extracted economic drivers and DSO mapping for", nrow(elcom_clean), "municipalities."))
   
 } else {
-  stop(paste("Failed to fetch data from LINDAS API. Status code:", status_code(response)))
+  stop(paste("CRITICAL ERROR: Failed to fetch data from LINDAS API. HTTP Status:", status_code(response)))
 }
 
 # -------------------------------------------------------------------
-# STEP 4.2: IMPORT BFS VOTING DATA & BUILD GREEN INDEX (H2)
+# STEP 4.2: INGESTION OF FEDERAL REFERENDUM DATA (CLIMATE POLICY)
 # -------------------------------------------------------------------
-# THE PROBLEM: We have three separate Excel files representing three different 
-# federal referendums on climate policy. Writing the exact same cleaning code 
-# three times is inefficient and prone to errors.
-# THE SOLUTION: We write a custom function that takes the file name and the 
-# desired output column name, cleans the data, and returns a neat table.
+# Methodological Note: Aggregates municipal voting outcomes across three 
+# major federal climate referendums to construct a continuous ideological 
+# control variable representing local environmental sentiment.
 
-print("Reading 3 BFS Voting Excel files and building Green Index...")
+print("Parsing BFS voting records to construct Climate Policy Index...")
 
-# 1. Define the Custom Cleaning Function
+# 1. Define Standardized Parsing Function
 clean_vote_file <- function(file_name, vote_col_name) {
-  # Load the raw Excel file
   raw_data <- read_excel(here("data", "raw", file_name))
   
   clean_data <- raw_data %>%
-    # A. Rename columns by their index (1, 2, 3) instead of their exact names.
-    # Excel headers from the BFS often change slightly or have weird spacing. 
-    # Renaming by position ensures the script doesn't break.
+    # A. Positional Renaming 
+    # Mitigates schema variations and inconsistent header spacing across 
+    # different BFS export years.
     rename(
       Area_Code = 1,
       Area_Name = 2,
@@ -372,72 +335,65 @@ clean_vote_file <- function(file_name, vote_col_name) {
       Yes_Percent = 5
     ) %>%
     
-    # B. Filter for Municipalities Only
-    # Just like the population data, the BFS indents municipality names with 
-    # exactly 6 dots ("......"). We use str_detect and Regex "^\\.\\.\\.\\.\\.\\." 
-    # (starts with 6 dots) to drop Cantons and Districts.
+    # B. Isolate Municipal Observations
+    # Excludes Cantonal and District aggregates using strict string matching.
     filter(str_detect(Area_Name, "^\\.\\.\\.\\.\\.\\.")) %>%
     
     mutate(
       BFS_Nr = as.numeric(Area_Code),
-      
-      # C. The European Decimal Fix
-      # Sometimes Excel imports Swiss numbers as text with commas (e.g., "54,2").
-      # R cannot do math on commas. We force it to character, swap the comma 
-      # for a period with str_replace, and then convert to numeric.
+      # C. Numeric Coercion & European Decimal Standardization
+      # Casts European comma-decimals to standard periods for R computation.
       Yes_Percent = as.numeric(str_replace(as.character(Yes_Percent), ",", "."))
     ) %>%
     select(BFS_Nr, Yes_Percent) %>%
     
-    # D. Dynamic Renaming
-    # The '!!' (bang-bang) operator combined with ':=' allows us to use the 
-    # string we passed into the function (vote_col_name) as an actual column name.
+    # D. Dynamic Feature Naming
     rename(!!vote_col_name := Yes_Percent)
   
   return(clean_data)
 }
 
-# 2. Apply the Function
-# One line of code per file! Much cleaner.
+# 2. Execute Parsing Function
 vote_2017 <- clean_vote_file("2017Energy.Act_Outcome_YESSHARE.xlsx", "Yes_2017")
 vote_2021 <- clean_vote_file("2021CO2.Act_Outcome_YESSHARE.xlsx", "Yes_2021")
 vote_2024 <- clean_vote_file("2024Climate.Protection.Act_Outcome_YESSHARE.xlsx", "Yes_2024")
 
-# 3. Build the Green Index (The Core Variable for H2)
+# 3. Construct Aggregate Climate Index
 green_index_clean <- vote_2017 %>%
-  # We use full_join instead of left_join. If a municipality didn't exist in 
-  # 2017 but merged and existed in 2021, full_join keeps the data!
+  # Utilize full joins to preserve municipalities that underwent administrative 
+  # mergers or name changes during the 2017-2024 operational window.
   full_join(vote_2021, by = "BFS_Nr") %>%
   full_join(vote_2024, by = "BFS_Nr") %>%
   
-  # Group the dataframe row-by-row so the mean() function calculates the average 
-  # ACROSS the columns for each specific municipality, rather than down the column.
+  # Compute the row-wise mean to handle unbalanced panels (e.g., if a 
+  # newly formed municipality missed the 2017 vote).
   rowwise() %>%
-  # c_across(starts_with("Yes_")) grabs all three vote columns automatically.
-  # na.rm = TRUE ensures that if a town missed one vote, the average is just 
-  # calculated from the other two.
   mutate(Green_Index = mean(c_across(starts_with("Yes_")), na.rm = TRUE)) %>%
-  ungroup() %>% # Always ungroup after a rowwise operation to prevent slow performance later
+  ungroup() %>% 
   
   select(BFS_Nr, Yes_2017, Yes_2021, Yes_2024, Green_Index)
 
-print(paste("Green Index successfully calculated for", nrow(green_index_clean), "municipalities."))
+print(paste("Climate Index successfully aggregated for", nrow(green_index_clean), "municipalities."))
 
 # -------------------------------------------------------------------
-# STEP 4.3: IMPORT NATIONAL COUNCIL ELECTIONS (H3: Left-Green Strength)
+# STEP 4.3: IMPORT NATIONAL COUNCIL ELECTIONS (H3: LEFT-GREEN IDEOLOGY)
 # -------------------------------------------------------------------
-print("Reading 2023 National Council Election JSON...")
+# Methodological Note: Extracts the combined voting share of the SP and GPS 
+# parties from the 2023 National Council elections to operationalize the 
+# primary political ideology hypothesis (H3).
+
+print("Parsing 2023 National Council Election JSON...")
 
 json_file_path <- here("data", "raw", "NRW_2023_Dataset.json")
 
 if (!file.exists(json_file_path)) {
-  stop(paste("FEHLER: Datei nicht gefunden unter", json_file_path))
+  stop(paste("CRITICAL ERROR: Data file not located at", json_file_path))
 }
 
 elections_raw <- fromJSON(json_file_path)
 elections_df <- elections_raw$level_gemeinden
 
-# 4. Clean and aggregate the voting shares
+# 1. Clean and Aggregate Voting Shares
 left_green_clean <- elections_df %>%
   mutate(
     BFS_Nr = as.numeric(gemeinde_nummer),
@@ -447,123 +403,122 @@ left_green_clean <- elections_df %>%
   group_by(BFS_Nr) %>%
   summarise(
     Total_Votes = sum(Votes, na.rm = TRUE),
+    # Isolate SP and GPS party identifiers (3, 13, 31)
     Left_Green_Votes = sum(Votes[Partei_ID %in% c(3, 13, 31)], na.rm = TRUE),
     .groups = "drop"
   ) %>%
   
-  # A. Calculate the raw percentage
-  mutate(Left_Green_Share_2023 = (Left_Green_Votes / Total_Votes) * 100) %>%
+  # 2. Compute Relative Share and Handle Structural Zeros
+  mutate(
+    Left_Green_Share_2023 = (Left_Green_Votes / Total_Votes) * 100,
+    # Coerce absolute zeros to NA to prevent artificial skew from 
+    # municipalities that failed to report specific party splits.
+    Left_Green_Share_2023 = na_if(Left_Green_Share_2023, 0)
+  ) %>%
   
-  # B. THE FIX: Convert artificial 0% to NA (Missing Data)
-  # na_if() automatically searches the column and replaces any exact 0 with NA.
-  mutate(Left_Green_Share_2023 = na_if(Left_Green_Share_2023, 0)) %>%
-  
-  # C. Keep the final variables
   select(BFS_Nr, Left_Green_Share_2023)
 
-print(paste("Left-Green voting share calculated for", nrow(left_green_clean), "municipalities."))
+print(paste("Left-Green voting share extracted for", nrow(left_green_clean), "municipalities."))
 
 # -------------------------------------------------------------------
-# STEP 4.4: IMPORT SOLAR IRRADIATION (Control Variable)
+# STEP 4.4: IMPORT SOLAR IRRADIATION (ENVIRONMENTAL CONTROL)
 # -------------------------------------------------------------------
-# THE PURPOSE: To prove that solar adoption isn't just driven by geography 
-# (e.g., "sunny places build more panels"), we need a physical control variable. 
-# This isolates the political and economic effects from the weather.
+# Methodological Note: Introduces physical solar potential as an exogenous 
+# control variable. This isolates socio-economic and policy variance by 
+# controlling for baseline geographical sunlight disparities.
 
-print("Reading Solar Irradiation Excel file...")
+print("Ingesting Solar Irradiation Control Data...")
 
 irradiation_file <- here("data", "raw", "solar_radiation_per_municipality.xlsx")
 
-# 1. Safety Check
-# Ensure the file exists before attempting to read it, throwing a clear error if missing.
 if (!file.exists(irradiation_file)) {
-  stop(paste("FEHLER: Datei nicht gefunden unter", irradiation_file))
+  stop(paste("CRITICAL ERROR: Data file not located at", irradiation_file))
 }
 
-# 2. Read and Clean the Data
 irradiation_raw <- read_excel(irradiation_file)
 
 irradiation_clean <- irradiation_raw %>%
   mutate(
     BFS_Nr = as.numeric(bfs_nummer),
-    # We directly extract the physical irradiation metric (kWh/m2) to act 
-    # as our geographical control variable in the regression model.
+    # Directly extract the physical irradiation metric (kWh/m2)
     Irradiation_kWh_m2 = as.numeric(radiation_kWh_m2) 
   ) %>%
   select(BFS_Nr, Irradiation_kWh_m2)
 
-print(paste("Solar irradiation data loaded for", nrow(irradiation_clean), "municipalities."))
+print(paste("Environmental control (Irradiation) mapped for", nrow(irradiation_clean), "municipalities."))
 
 # -------------------------------------------------------------------
-# STEP 4.5: CALCULATE PEER EFFECTS (Baseline PV Density < 2018)
+# STEP 4.5: OPERATIONALIZE PEER EFFECTS (BASELINE PV DENSITY < 2018)
 # -------------------------------------------------------------------
-# THE PURPOSE: To test the "Neighborhood Effect" (Path Dependency). 
-# Does seeing solar panels on your neighbors' roofs accelerate new adoption?
-# We calculate the exact density of solar panels that existed *before* our 
-# 2018-2024 study period even began.
+# Methodological Note: To test for path dependency and localized spatial 
+# spillover effects ("Neighborhood Effect"), this step calculates the exact 
+# density of solar capacity (Watts/Capita) existing prior to the study window (2018-2024).
 
-print("Calculating 2017 Baseline PV Density for Peer Effects...")
+print("Calculating pre-treatment Baseline PV Density (2017) for Peer Effects...")
 
-library(lubridate)
-
-# 1. Filter the raw BFE dataset & Match PostCodes to BFS_Nr
+# 1. Isolate Historical Infrastructure Data
 baseline_plants <- all_plants_raw %>%
   mutate(
     Commissioning_Date = as.Date(BeginningOfOperation),
     PostCode = as.numeric(PostCode) 
   ) %>%
-  # *** TIME TRAVEL FILTER ***
-  # We strictly isolate installations commissioned before January 1, 2018.
+  
+  # A. Pre-Treatment Temporal Truncation
+  # Strictly isolate installations commissioned prior to January 1, 2018.
   filter(Commissioning_Date < as.Date("2018-01-01")) %>%
   
-  # Use our previously built Swisstopo lookup to translate the PostCode 
-  # into the official BFS_Nr, dropping any unmatchable rows.
+  # B. Spatial Mapping
+  # Utilize the Swisstopo deterministic lookup to map PLZ to BFS_Nr.
   left_join(ortschaften_lookup, by = c("PostCode" = "PLZ")) %>%
   filter(!is.na(BFS_Nr))
 
-# 2. Aggregate the Historical Baseline
-baseline_counts <- baseline_plants %>%
+# 2. Aggregate Historical Capacity (NOT Counts)
+baseline_capacity <- baseline_plants %>%
   group_by(BFS_Nr) %>%
   summarise(
-    # Count the total absolute number of physical installations per municipality
-    Baseline_Installations_2017 = n(),
+    # Aggregate TotalPower (assuming raw Pronovo data is in kW) 
+    # and multiply by 1000 to convert to Watts.
+    Baseline_Total_Watts_2017 = sum(TotalPower, na.rm = TRUE) * 1000,
     .groups = "drop"
   )
 
-# 3. Calculate Density (Installations per 1,000 inhabitants in 2017)
-peer_effects_clean <- baseline_counts %>%
+# 3. Standardize to Density Metric (Watts/Capita)
+peer_effects_clean <- baseline_capacity %>%
   left_join(population_clean, by = "BFS_Nr") %>%
   mutate(
-    # Absolute counts are biased toward large cities. We divide by population 
-    # to create a standardized "Visual Density" metric (panels per 1,000 people).
-    Baseline_PV_Density_2017 = (Baseline_Installations_2017 / Population) * 1000
+    # Ensure perfect unit alignment with the Dependent Variable:
+    # Divide total pre-2018 Watts by the municipal population.
+    Baseline_PV_Density_2017 = Baseline_Total_Watts_2017 / Population
   ) %>%
   select(BFS_Nr, Baseline_PV_Density_2017)
 
-print(paste("Peer effects baseline calculated for", nrow(peer_effects_clean), "municipalities."))
+print(paste("Pre-treatment peer effects baseline (Watts/Capita) calculated for", nrow(peer_effects_clean), "municipalities."))
 
 # -------------------------------------------------------------------
-# STEP 4.6: IMPORT ESTV HOUSEHOLD WEALTH (Replacing Stadelmann)
+# STEP 4.6: INGEST FEDERAL TAX DATA (HOUSEHOLD WEALTH PROXY)
 # -------------------------------------------------------------------
-print("Reading ESTV Taxable Income (Household Wealth Proxy)...")
+# Methodological Note: Extracts per-taxpayer taxable income to serve as 
+# the primary proxy for municipal household wealth and capital availability.
+
+print("Ingesting ESTV Taxable Income Data...")
 
 wealth_file_path <- here("data", "raw", "27598_DE.csv")
 
 if (!file.exists(wealth_file_path)) {
-  stop(paste("FEHLER: Datei nicht gefunden unter", wealth_file_path))
+  stop(paste("CRITICAL ERROR: Data file not located at", wealth_file_path))
 }
 
 wealth_raw <- read_delim(wealth_file_path, delim = ";", locale = locale(encoding = "UTF-8"), show_col_types = FALSE)
 
 wealth_clean <- wealth_raw %>%
-  
-  # *** THE FIX: Squash the Cartesian Join ***
-  # Keep ONLY the per-taxpayer rows by excluding any row with "Mio" (Millions) in the variable name
+  # Resolving Dimensionality Conflicts
+  # Exclude aggregate cantonal/national rows (denoted by "Mio" for millions) 
+  # to isolate strictly granular, per-taxpayer metrics.
   filter(!str_detect(VARIABLE, "Mio")) %>%
   
   select(
     BFS_Nr = GEO_ID,
-    Gemeindename_ESTV = GEO_NAME,   # <--- ADDED THE MUNICIPALITY NAME HERE!
+    Gemeindename_ESTV = GEO_NAME, 
     Taxable_Income = VALUE
   ) %>%
   mutate(
@@ -572,25 +527,31 @@ wealth_clean <- wealth_raw %>%
   ) %>%
   filter(!is.na(BFS_Nr))
 
-print(paste("Household wealth data loaded for", nrow(wealth_clean), "municipalities."))
+print(paste("Socio-economic control (Household Wealth) mapped for", nrow(wealth_clean), "municipalities."))
 
 # -------------------------------------------------------------------
-# STEP 4.7: IMPORT POPULATION DENSITY (The Roof Scarcity Proxy)
+# STEP 4.7: IMPORT POPULATION DENSITY (URBANIZATION/SCARCITY PROXY)
 # -------------------------------------------------------------------
-print("Reading Population Density Data...")
+# Methodological Note: Utilizes population density as a structural control 
+# variable to proxy roof scarcity and the prevalence of multi-family 
+# renter-occupied housing environments (the "split-incentive" problem).
+
+print("Ingesting Population Density Data...")
 
 density_file_path <- here("data", "raw", "population_density_2018_2023(in).csv")
 
 if (!file.exists(density_file_path)) {
-  stop(paste("FEHLER: Datei nicht gefunden unter", density_file_path))
+  stop(paste("CRITICAL ERROR: Data file not located at", density_file_path))
 }
 
-# Assuming standard comma separation. If it fails, change to read_delim(..., delim = ";")
 density_raw <- read_csv(density_file_path, show_col_types = FALSE)
 
 density_clean <- density_raw %>%
   mutate(BFS_Nr = as.numeric(bfs_nummer)) %>%
-  # Squash the longitudinal data: Calculate the average density across the study period
+  
+  # Cross-Sectional Compression
+  # Collapse the longitudinal panel structure by calculating the 
+  # period-average density for the study window.
   group_by(BFS_Nr) %>%
   summarise(
     Population_Density = mean(population_density, na.rm = TRUE),
@@ -598,183 +559,227 @@ density_clean <- density_raw %>%
   ) %>%
   filter(!is.na(BFS_Nr))
 
-print(paste("Population density data loaded for", nrow(density_clean), "municipalities."))
+print(paste("Structural control (Population Density) mapped for", nrow(density_clean), "municipalities."))
 
 # -------------------------------------------------------------------
-# STEP 4.8: IMPORT HEAT PUMP DATA (Sector Coupling Proxy)
+# STEP 4.8: INGEST BUILDING STRUCTURE DATA (SINGLE-FAMILY HOMES)
 # -------------------------------------------------------------------
-print("Reading Heat Pump Data...")
+# Methodological Note: Extracts the proportion of single-family homes per 
+# municipality to act as a structural proxy for homeownership. This isolates 
+# the "split-incentive" barrier, allowing the model to disentangle political 
+# ideology from the physical capacity to install PV systems.
 
-# REPLACE WITH YOUR EXACT FILENAME
-hp_file_path <- here("data", "raw", "heating_pumps(in).csv") 
+print("Ingesting and optimizing BFS Building Structure Data (SFH Share)...")
 
-if (!file.exists(hp_file_path)) {
-  stop(paste("FEHLER: Datei nicht gefunden unter", hp_file_path))
+# Define file path to the 700MB GWS export
+sfh_file_path <- here("data", "raw", "CH1.GWS,DF_GWS_REG1,1.0.0+all.csv")
+
+if (!file.exists(sfh_file_path)) {
+  stop(paste("CRITICAL ERROR: Data file not located at", sfh_file_path))
 }
 
-hp_raw <- read_csv(hp_file_path, show_col_types = FALSE)
+# 1. Memory-Optimized Ingestion
+# We read only the 4 essential columns to prevent RAM overload from the 700MB file.
+sfh_raw <- read_delim(
+  sfh_file_path, 
+  delim = ",", 
+  col_select = c(GEMEINDENAME, TIME_PERIOD, `Building category`, OBS_VALUE),
+  show_col_types = FALSE
+)
 
-hp_clean <- hp_raw %>%
-  mutate(BFS_Nr = as.numeric(bfs_nummer)) %>%
-  # Squash the panel data by taking the mean across the available years
+# 2. Cross-Sectional Filtering & Aggregation
+sfh_clean <- sfh_raw %>%
+  # A. Temporal Truncation: Isolate the most recent reliable cross-section 
+  # (Change to 2022 if available in your dataset, otherwise 2021 is fine)
+  filter(TIME_PERIOD == 2021) %>%
+  
+  # B. Standardize Identifiers
+  mutate(BFS_Nr = as.numeric(GEMEINDENAME)) %>%
+  filter(!is.na(BFS_Nr)) %>%
+  
+  # C. Aggregate Building Counts per Municipality
+  # Because the data is split by "Construction Period" (e.g., pre-1919), 
+  # we must group and sum them to get the total contemporary building stock.
   group_by(BFS_Nr) %>%
   summarise(
-    Heat_Pump_Share = mean(heating_pumps, na.rm = TRUE),
+    # Total Residential Buildings (Sum of all rows for this municipality)
+    Total_Residential = sum(OBS_VALUE, na.rm = TRUE),
+    
+    # Single-Family Homes (Sum only where the category explicitly matches)
+    # Using str_detect allows flexibility if the BFS text changes slightly
+    SFH_Count = sum(OBS_VALUE[str_detect(`Building category`, "Single-family house")], na.rm = TRUE),
+    
     .groups = "drop"
   ) %>%
-  filter(!is.na(BFS_Nr))
+  
+  # D. Construct the Structural Homeownership Proxy
+  mutate(
+    Share_SFH = (SFH_Count / Total_Residential) * 100,
+    # Impute structural zeros for missing data
+    Share_SFH = coalesce(Share_SFH, 0)
+  ) %>%
+  
+  # E. Final Feature Selection
+  select(BFS_Nr, Share_SFH)
 
-print(paste("Heat pump data loaded for", nrow(hp_clean), "municipalities."))
-
+print(paste("Structural control (Single-Family Home Share) successfully mapped for", nrow(sfh_clean), "municipalities."))
 
 # -------------------------------------------------------------------
-# STEP 5: JOIN EVERYTHING & CALCULATE DEPENDENT VARIABLES
+# STEP 5: RELATIONAL DATA MERGE & DEPENDENT VARIABLE CONSTRUCTION
 # -------------------------------------------------------------------
-print("Joining datasets...")
+# Methodological Note: Integrates the disparate spatial, demographic, 
+# economic, and political indices into a unified cross-sectional analytical 
+# dataframe via deterministic spatial joins (BFS_Nr).
 
-# 5a. Join Solar Data to Swisstopo
+print("Executing relational data merge to construct Master Panel...")
+
+# 1. Spatial Integration of Dependent Variable
 solar_mapped <- solar_growth_clean %>%
   mutate(PostCode = as.numeric(PostCode)) %>% 
+  # Map postal codes to administrative municipal identifiers
   left_join(ortschaften_lookup, by = c("PostCode" = "PLZ")) %>%
   filter(!is.na(BFS_Nr))
 
-# 5b. Aggregate Solar GROWTH per Commune
+# 2. Municipal Aggregation
 solar_agg_commune <- solar_mapped %>%
   group_by(BFS_Nr, Gemeindename, Canton) %>%
   summarise(
+    # Aggregate absolute capacity additions for the 2018-2024 window
     New_Solar_kW = sum(TotalPower, na.rm = TRUE),
-    New_Installations_Count = n(),
     .groups = "drop"
   )
 
-# 5c. The Master Join
+# 3. Constructing the Analytical Master Panel
 final_dataset <- solar_agg_commune %>%
+  # Execute sequential left-joins to bind all structural predictors and controls
   left_join(population_clean, by = "BFS_Nr") %>%
-  left_join(elcom_clean, by = "BFS_Nr") %>%         
+  left_join(elcom_clean, by = "BFS_Nr") %>%          
   left_join(green_index_clean, by = "BFS_Nr") %>%   
   left_join(left_green_clean, by = "BFS_Nr") %>%    
   left_join(irradiation_clean, by = "BFS_Nr") %>%   
   left_join(peer_effects_clean, by = "BFS_Nr") %>%  
   left_join(wealth_clean, by = "BFS_Nr") %>%        
-  left_join(density_clean, by = "BFS_Nr") %>%      
-  left_join(hp_clean, by = "BFS_Nr") %>%
+  left_join(density_clean, by = "BFS_Nr") %>%        
+  left_join(sfh_clean, by = "BFS_Nr") %>%
   
   mutate(
-    # Ensure baseline is 0 if no data exists
+    # Impute structural zeros: Municipalities with no pre-2018 installations 
+    # correctly have a baseline density of 0, not NA.
     Baseline_PV_Density_2017 = coalesce(Baseline_PV_Density_2017, 0),
     
-    # Core Dependent Variables
-    New_Watts_per_Capita = (New_Solar_kW * 1000) / Population,
-    Adoption_Intensity = (New_Installations_Count / Population) * 1000
+    # Standardize Core Dependent Variable
+    # Convert kilowatts to watts and scale by population to allow for 
+    # unbiased cross-sectional comparison between urban and rural communes.
+    New_Watts_per_Capita = (New_Solar_kW * 1000) / Population
   ) %>%
-  # Filter 1: Remove municipalities with fewer than 100 people (statistical noise)
+  
+  # A. Exclusion Criterion 1: Micro-Populations
+  # Exclude municipalities with fewer than 100 residents to mitigate 
+  # extreme per-capita outlier distortion and heteroskedasticity.
   filter(!is.na(Population) & Population > 100) %>%
-  # Filter 2: Ensure we have the operator data for H1.B
+  
+  # B. Exclusion Criterion 2: Missing Institutional Infrastructure
+  # Observations lacking DSO identification must be dropped, as they cannot 
+  # be mapped into the clustered standard error matrix in the final OLS model.
   filter(!is.na(Operator_Name))
 
-print(paste("Final dataset created with", nrow(final_dataset), "municipalities."))
+print(paste("Analytical Master Panel constructed. Final N =", nrow(final_dataset), "municipalities."))
 
 # -------------------------------------------------------------------
-# STEP 6: SAVE RESULTS
+# STEP 6: DATA SERIALIZATION
 # -------------------------------------------------------------------
+# Methodological Note: The finalized dataframe is serialized as an RDS object 
+# to perfectly preserve factor levels, date formats, and numeric classes for 
+# subsequent econometric modeling.
+
 saveRDS(final_dataset, here("data", "processed", "solar_growth_2018_2024_final.rds"))
 
-print("Analysis complete. Final regression dataset saved to data/processed/.")
+print("Data processing pipeline complete. Analytical dataset serialized to data/processed/.")
 
 # -------------------------------------------------------------------
-# STEP 7: SAVE MASTER DATASET & GENERATE DESCRIPTIVE STATISTICS
+# STEP 7: GENERATE DESCRIPTIVE STATISTICS
 # -------------------------------------------------------------------
+# Methodological Note: Computes summary statistics across the complete 
+# analytical panel to establish baseline distributional characteristics 
+# prior to multivariate regression analysis.
 
-# 1. Save the Final Analytical Dataset
-saveRDS(final_dataset, here("data", "processed", "solar_growth_2018_2024_final.rds"))
-print("Analysis complete. Final dataset saved to data/processed/.")
+print("Generating Descriptive Statistics Matrix...")
 
-print("Generating Descriptive Statistics...")
-
-# 2. Prepare Data for Descriptives (Organized by Research Design)
+# 1. Isolate Analytical Variables
 desc_data <- final_dataset %>%
   select(
     # DEPENDENT VARIABLE
-    New_Watts_per_Capita,
+    `New PV Capacity (Watts/Capita)` = New_Watts_per_Capita,
     
-    # H1: ECONOMIC (Price Effect)
-    Peak_Price_2023,          # H1.A
+    # H1: ECONOMIC INCENTIVES
+    `Peak Elec. Price 2023 (Rp/kWh) [H1]` = Peak_Price_2023,
     
-    # H2: SOCIAL (Peer Effects / Path Dependency)
-    Baseline_PV_Density_2017, # The "Neighbor Effect"
+    # H2: SOCIAL MOMENTUM
+    `Baseline PV Density 2017 (Watts/Capita) [H2]` = Baseline_PV_Density_2017, 
     
-    # H3: POLITICAL (Ideology)
-    Left_Green_Share_2023,    
+    # H3: POLITICAL IDEOLOGY
+    `Left-Green Party Share (%) [H3]` = Left_Green_Share_2023,
     
-    # CONTROLS (Environmental, Sector Coupling & Demographics)
-    Irradiation_kWh_m2,       # Environmental Control
-    Heat_Pump_Share,          # Technology Control
-    Taxable_Income,           # Socio-economic Control
-    Population_Density        # Geographic Control
+    # CONTROL VARIABLES
+    `Taxable Income (CHF/Taxpayer)` = Taxable_Income,
+    `Population Density (Inh./km2)` = Population_Density,
+    `Solar Irradiation (kWh/m2)` = Irradiation_kWh_m2,
+    `Single-Family Home Share (%)` = Share_SFH
   ) %>%
   as.data.frame()
 
-# 3. Define Clean Labels in Exactly the Same Order
-final_labels <- c(
-  "New PV Capacity (Watts/Capita)",           # Dependent
-  "Peak Elec. Price 2023 (Rp/kWh) [H1.A]",    # H1
-  "Baseline PV Density 2017 [H2]",            # H2
-  "Left-Green Party Share (%) [H3]",          # H3
-  "Solar Irradiation (kWh/m2)",               # Environmental Control
-  "Heat Pump Share (%)",                      # Control
-  "Taxable Income (CHF/Taxpayer)",            # Control
-  "Population Density (Inh./km2)"             # Control
-)
-
-# 4. Print Descriptive Table to Console
+# 2. Output to Console (Verification)
 stargazer(
   desc_data, 
   type = "text", 
-  title = "Table 1: Descriptive Statistics by Hypothesis Grouping",
-  digits = 2,
-  covariate.labels = final_labels
+  title = "Table 1: Descriptive Statistics of Municipal Variables",
+  digits = 2
 )
 
-# 5. Save Descriptive Table to Word for the Final Paper
+# 3. Output to Final Document (HTML/Word)
 stargazer(
   desc_data, 
   type = "html", 
   out = here("data", "processed", "Table1_Descriptive_Statistics.doc"),
-  title = "Table 1: Descriptive Statistics",
-  digits = 2,
-  covariate.labels = final_labels
+  title = "Table 1: Descriptive Statistics of Municipal Variables",
+  digits = 2
 )
 
 # -------------------------------------------------------------------
-# STEP 7.1: BIVARIATE ANALYSIS (Hypothesis Scatterplots)
+# STEP 7.1: BIVARIATE CORRELATION ANALYSIS (SCATTERPLOTS)
 # -------------------------------------------------------------------
-print("Generating Continuous Hypothesis Scatterplots...")
+# Methodological Note: Visualizes unadjusted, bivariate linear trends 
+# between individual predictors and the dependent variable to assess 
+# structural directionality before applying covariate controls.
 
+print("Executing Bivariate Visualizations...")
+
+# 1. Transform Data for Faceted Plotting
 scatter_data <- final_dataset %>%
   mutate(
-    `H1.A: Peak Price 2023` = Peak_Price_2023,
-    `H2: Baseline Density 2017` = Baseline_PV_Density_2017,
+    `H1: Peak Price 2023` = Peak_Price_2023,
+    `H2: Baseline PV Density 2017 (Log)` = log(Baseline_PV_Density_2017 + 1),
     `H3: Left-Green Share (%)` = Left_Green_Share_2023,
-    `Ctrl: Solar Irradiation` = Irradiation_kWh_m2, # Added Environmental Control
-    `Ctrl: Heat Pump Share` = Heat_Pump_Share,
+    `Ctrl: Solar Irradiation` = Irradiation_kWh_m2,
     `Ctrl: Taxable Income (Log)` = log(Taxable_Income),
-    `Ctrl: Pop. Density (Log)` = log(Population_Density)
+    `Ctrl: Pop. Density (Log)` = log(Population_Density),
+    `Ctrl: SFH Share (%)` = Share_SFH
   ) %>%
-  # H1.B (Community Proxy) is excluded as binary variables do not suit trend lines
   select(New_Watts_per_Capita, starts_with("H"), starts_with("Ctrl")) %>%
   pivot_longer(cols = -New_Watts_per_Capita, names_to = "Predictor", values_to = "Value")
 
+# 2. Render Structural Correlation Plot
 scatter_plot <- ggplot(scatter_data, aes(x = Value, y = New_Watts_per_Capita)) +
-  # Using alpha for density to handle the high N of Swiss municipalities
+  # Mitigate overplotting via alpha blending for high-N municipal observations
   geom_point(alpha = 0.2, color = "#2ecc71", size = 1) + 
-  # Linear trend line (Red) to visualize the correlation
+  # Overlay unadjusted linear models
   geom_smooth(method = "lm", color = "#c0392b", fill = "#e74c3c", alpha = 0.2) +
-  facet_wrap(~ Predictor, scales = "free_x", ncol = 4) + # Adjusted to 4 columns for balance
+  facet_wrap(~ Predictor, scales = "free_x", ncol = 4) + 
   theme_minimal() +
   labs(
-    title = "Structural Correlation Analysis: Bivariate Trends in Solar Adoption",
-    subtitle = "Visualizing Individual Hypothesis [H1-H3] and Environmental Drivers without Covariate Control",
-    x = "Independent Variable (Unit-Specific or Log Scale)",
+    title = "Structural Correlation Analysis: Unadjusted Bivariate Trends",
+    subtitle = "Assessing directionality of H1-H3 and Controls prior to multivariate adjustments",
+    x = "Independent Variable (Unit-Specific or Log Transformed)",
     y = "New PV Capacity (Watts/Capita)"
   ) +
   theme(
@@ -786,40 +791,43 @@ print(scatter_plot)
 ggsave(here("plots", "EDA_2_Scatterplots_Final.png"), plot = scatter_plot, width = 14, height = 8, dpi = 300)
 
 # -------------------------------------------------------------------
-# STEP 7.2: EXPLORATORY DATA ANALYSIS (Final Design Version)
+# STEP 7.2: DISTRIBUTIONAL AUDIT (HISTOGRAMS)
 # -------------------------------------------------------------------
-print("Generating Exploratory Distributions (Histograms)...")
+# Methodological Note: Validates variable distributions to justify the 
+# log-transformations applied to highly skewed structural covariates 
+# (Wealth and Population Density) required by OLS assumptions.
 
+print("Executing Distributional Audits...")
+
+# 1. Transform Data for Faceted Auditing
 hist_clean_dataset <- final_dataset %>%
-  # 1. Create clean, labeled, and logged versions mapped to Hypotheses
   mutate(
     `Dep. Var: New PV Watts/Capita` = New_Watts_per_Capita,
     `H1: Peak Price 2023` = Peak_Price_2023,
-    `H2: Baseline PV Density 2017` = Baseline_PV_Density_2017,
+    `H2: Baseline PV Density 2017 (Log)` = log(Baseline_PV_Density_2017 + 1),
     `H3: Left-Green Party Share` = Left_Green_Share_2023,
-    `Control: Heat Pump Share` = Heat_Pump_Share,
     `Control: Taxable Income (Log)` = log(Taxable_Income),
     `Control: Population Density (Log)` = log(Population_Density),
-    `Control: Solar Irradiation` = Irradiation_kWh_m2
+    `Control: Solar Irradiation` = Irradiation_kWh_m2,
+    `Control: SFH Share (%)` = Share_SFH
   ) %>%
-  # 2. Select ONLY the clean H-labeled names
   select(
     starts_with("Dep."), starts_with("H1"), starts_with("H2"), 
     starts_with("H3"), starts_with("Control")
   ) %>%
   pivot_longer(cols = everything(), names_to = "Variable", values_to = "Value")
 
-# --- THE PLOT ---
+# 2. Render Distribution Grid
 hist_plot <- ggplot(hist_clean_dataset, aes(x = Value)) +
   geom_histogram(bins = 30, fill = "#2c3e50", color = "white", alpha = 0.8) +
-  # Scales="free" is critical because units range from 0-1 (log) to 1000s (Watts)
+  # Independent facet scaling allows visualization across heterogenous unit ranges
   facet_wrap(~ Variable, scales = "free", ncol = 3) + 
   theme_minimal() +
   labs(
-    title = "Distribution of Primary and Control Variables across Swiss Municipalities",
-    subtitle = "Visualizing Hypothesis-Driven Variables [H1-H3] and Environmental/Structural Controls",
-    x = "Value / Log Value",
-    y = "Count of Municipalities"
+    title = "Distributional Audit of Primary and Control Variables",
+    subtitle = "Validating the application of logarithmic transformations for skewed structural proxies",
+    x = "Observation Value",
+    y = "Municipal Frequency"
   ) +
   theme(
     strip.text = element_text(face = "bold", size = 9),
@@ -831,115 +839,276 @@ print(hist_plot)
 ggsave(here("plots", "EDA_1_Histograms_Final.png"), plot = hist_plot, width = 12, height = 10, dpi = 300)
 
 # -------------------------------------------------------------------
-# STEP 8: FINAL PEAK PRICE REGRESSION (H1, H2, H3 + Controls)
+# STEP 8: PRIMARY MULTIVARIATE OLS REGRESSION (BASELINE)
 # -------------------------------------------------------------------
-print("Running Final Optimized Peak Price Model...")
+# Methodological Note: Estimates the primary multivariate OLS specification 
+# assessing the impact of economic, social, and political drivers on PV adoption.
+# DSO clustering has been temporarily removed for the baseline draft.
 
-# 1. The Core Regression
-# We add Irradiation here to control for geographic solar potential.
+print("Estimating Baseline OLS Model...")
+
+# 1. Base Regression Specification
 model_final <- lm(
-  New_Watts_per_Capita ~ Peak_Price_2023 + is_local_coop + 
-    Baseline_PV_Density_2017 + Left_Green_Share_2023 + 
-    Heat_Pump_Share + Irradiation_kWh_m2 + 
-    log(Taxable_Income) + log(Population_Density) + as.factor(Canton), 
+  New_Watts_per_Capita ~ Peak_Price_2023 + 
+    log(Baseline_PV_Density_2017 + 1) +
+    Left_Green_Share_2023 + 
+    Irradiation_kWh_m2 + 
+    log(Taxable_Income) + log(Population_Density) + Share_SFH + as.factor(Canton), 
   data = final_dataset
 )
 
-# 2. Robustness: Calculate Clustered Standard Errors
-# Clustered by Utility Provider (Operator_Name)
-robust_se <- list(sqrt(diag(vcovCL(model_final, cluster = ~Operator_Name))))
-
-# 3. Prepare Data for the Plot
+# 2. Data Transformation for Coefficient Visualization
 model_results <- tidy(model_final, conf.int = TRUE) %>%
-  filter(term != "(Intercept)" & !str_detect(term, "as.factor\\(Canton\\)")) %>% 
+  # Exclude the intercept and cantonal dummy variables from the plot
+  filter(term != "(Intercept)" & !str_detect(term, "as.factor\\(Canton\\)")) %>%
   mutate(
     term = case_when(
-      term == "Peak_Price_2023" ~ "Peak Elec. Price 2023 [H1.A]",
-      term == "is_local_coop" ~ "Community Utility Proxy [H1.B]",
-      term == "Baseline_PV_Density_2017" ~ "Baseline PV Density 2017 [H2]",
+      term == "Peak_Price_2023" ~ "Peak Elec. Price 2023 [H1]",
+      term == "log(Baseline_PV_Density_2017 + 1)" ~ "Baseline PV Density 2017 (Log) [H2]",
       term == "Left_Green_Share_2023" ~ "Left-Green Party Share [H3]",
-      term == "Heat_Pump_Share" ~ "Heat Pump Share (Sector Coupling)",
       term == "Irradiation_kWh_m2" ~ "Control: Solar Irradiation",
       term == "log(Taxable_Income)" ~ "Control: Taxable Income (Log)",
       term == "log(Population_Density)" ~ "Control: Population Density (Log)",
+      term == "Share_SFH" ~ "Control: Single-Family Home Share (%)",
       TRUE ~ term
-    )
+    ),
+    # Create grouping for facets to solve the scale disparity
+    Variable_Group = ifelse(str_detect(term, "\\[H"), "Primary Hypotheses", "Control Variables"),
+    # Evaluate Statistical Significance based on standard CI
+    Significant = ifelse(conf.low > 0 | conf.high < 0, "Significant (p < 0.05)", "Not Significant")
   ) %>%
-  # Reverse levels for plot hierarchy: Hypotheses on top, Controls on bottom
-  mutate(term = factor(term, levels = rev(c(
-    "Peak Elec. Price 2023 [H1.A]",
-    "Community Utility Proxy [H1.B]",
-    "Baseline PV Density 2017 [H2]",
-    "Left-Green Party Share [H3]",
-    "Control: Heat Pump Share (Sector Coupling)",
-    "Control: Solar Irradiation",
-    "Control: Taxable Income (Log)",
-    "Control: Population Density (Log)"
-  ))))
+  mutate(
+    term = factor(term, levels = rev(c(
+      "Peak Elec. Price 2023 [H1]",
+      "Baseline PV Density 2017 (Log) [H2]",
+      "Left-Green Party Share [H3]",
+      "Control: Solar Irradiation",
+      "Control: Taxable Income (Log)",
+      "Control: Population Density (Log)",
+      "Control: Single-Family Home Share (%)"
+    ))),
+    Variable_Group = factor(Variable_Group, levels = c("Primary Hypotheses", "Control Variables"))
+  )
 
-# 4. Render Coefficient Plot
-coef_plot <- ggplot(model_results, aes(x = estimate, y = term)) +
-  geom_vline(xintercept = 0, color = "red", linetype = "dashed", linewidth = 1) +
-  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, color = "#2c3e50", linewidth = 1) +
-  geom_point(size = 4, color = "#e67e22") +
-  geom_text(aes(label = round(estimate, 1)), vjust = -1.5, size = 3, fontface = "bold") +
+# 3. Render Coefficient Forest Plot (Faceted & Color-Coded)
+coef_plot <- ggplot(model_results, aes(x = estimate, y = term, color = Significant)) +
+  geom_vline(xintercept = 0, color = "black", linetype = "dashed", linewidth = 0.8) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, linewidth = 1) +
+  geom_point(size = 4) +
+  geom_text(aes(label = round(estimate, 1)), vjust = -1.5, size = 3.5, fontface = "bold", color = "black") +
+  # Split into two panels with independent X-axes
+  facet_wrap(~Variable_Group, scales = "free", ncol = 1) +
+  # Define custom colors for significance
+  scale_color_manual(values = c("Significant (p < 0.05)" = "#2c3e50", "Not Significant" = "#bdc3c7")) +
   labs(
-    title = "Key Drivers of Swiss Municipal Solar Adoption",
-    subtitle = "Optimized Peak Price Model (Full Controls) | Error Bars: 95% CI",
+    title = "Structural Drivers of Swiss Municipal Solar Adoption",
+    subtitle = "Baseline Multivariate OLS Model | Error Bars: 95% CI (Standard OLS)", 
     x = "Estimated Effect on New Capacity (Watts per Capita)",
     y = ""
   ) +
   theme_minimal() +
-  theme(axis.text.y = element_text(size = 11, face = "bold"))
+  theme(
+    axis.text.y = element_text(size = 11, face = "bold"),
+    strip.text = element_text(size = 12, face = "bold", hjust = 0),
+    legend.position = "bottom",
+    legend.title = element_blank()
+  )
 
 print(coef_plot)
-ggsave(here("plots", "Final_Regression_Optimized.png"), plot = coef_plot, width = 11, height = 8, dpi = 300)
+ggsave(here("plots", "Baseline_Regression_Plot.png"), plot = coef_plot, width = 11, height = 8, dpi = 300)
 
 # -------------------------------------------------------------------
-# STEP 8.1: ACADEMIC TABLE OUTPUT (Console & Word)
+# STEP 8.1: ACADEMIC TABLE GENERATION (MAIN RESULTS)
 # -------------------------------------------------------------------
 
-# Define the clean labels once to ensure consistency across both outputs
+# Standardize nomenclature for publication-ready outputs
 final_labels_clean <- c(
-  "Peak Elec. Price 2023 (Rp/kWh) [H1.A]",
-  "Community Utility Proxy (1/0) [H1.B]",
-  "Baseline PV Density 2017 [H2]",
+  "Peak Elec. Price 2023 (Rp/kWh) [H1]",
+  "Baseline PV Density 2017 (Log) [H2]",
   "Left-Green Party Share (%) [H3]",
-  "Control: Heat Pump Share (Sector Coupling)",
   "Control: Solar Irradiation (kWh/m2)",
   "Control: Taxable Income (Log)",
-  "Control: Population Density (Log)"
+  "Control: Population Density (Log)",
+  "Control: Single-Family Home Share (%)"
 )
 
-# 1. Output to Console (Text format for quick verification)
+# 1. Output to Console (Verification)
 stargazer(
   model_final,
   type = "text",
-  se = robust_se, 
+  # SE argument removed
   title = "Table 4: Regression Analysis of Swiss Municipal Solar Adoption",
   dep.var.labels = "New PV Capacity (Watts/Capita)",
   covariate.labels = final_labels_clean,
   column.labels = "Optimized Model",
+  # Force layout to match final_labels_clean
+  order = c("Peak_Price", "Baseline", "Left_Green", "Irradiation", "Taxable_Income", "Population_Density", "Share_SFH"),
   omit = "Canton",
-  omit.labels = "Cantonal Fixed Effects Included?",
+  add.lines = list(c("Cantonal Fixed Effects Included?", "Yes")),
   keep.stat = c("n", "adj.rsq"),
   digits = 2,
-  notes = "Note: Standard errors clustered at the Utility Provider level."
+  notes = "Note: Standard OLS errors utilized for baseline draft."
 )
 
-# 2. Output to Word (HTML format saved as .doc)
+# 2. Output to Word Document (Thesis Appendix/Results)
 stargazer(
   model_final,
   type = "html",
-  se = robust_se,
-  out = here("data", "processed", "Table4_Final_Regression_Analysis.doc"), # Saves directly to your folder
+  # SE argument removed
+  out = here("data", "processed", "Table4_Final_Regression_Analysis.doc"), 
   title = "Table 4: Regression Analysis of Swiss Municipal Solar Adoption",
   dep.var.labels = "New PV Capacity (Watts/Capita)",
   covariate.labels = final_labels_clean,
   column.labels = "2018-2024",
+  order = c("Peak_Price", "Baseline", "Left_Green", "Irradiation", "Taxable_Income", "Population_Density", "Share_SFH"),
   omit = "Canton",
-  omit.labels = "Cantonal Fixed Effects Included?",
+  add.lines = list(c("Cantonal Fixed Effects Included?", "Yes")),
   keep.stat = c("n", "adj.rsq"),
   digits = 2,
-  notes = "Note: Standard errors clustered at the Utility Provider level."
+  notes = "Note: Standard OLS errors utilized for baseline draft."
+)
+
+# -------------------------------------------------------------------
+# STEP 8.2: METHODOLOGICAL JUSTIFICATION TABLE (FE ONLY)
+# -------------------------------------------------------------------
+# Methodological Note: Demonstrates model evolution to justify the inclusion 
+# of Cantonal Fixed Effects (mitigating omitted variable bias).
+
+print("Generating Model Evolution Table (Naive vs. FE)...")
+
+# Model 1: Naive OLS (No Canton Fixed Effects, Standard SEs)
+model_naive <- lm(
+  New_Watts_per_Capita ~ Peak_Price_2023 + 
+    log(Baseline_PV_Density_2017 + 1) +
+    Left_Green_Share_2023 + 
+    Irradiation_kWh_m2 + 
+    log(Taxable_Income) + log(Population_Density) + Share_SFH, 
+  data = final_dataset
+)
+
+# Model 2: Fixed Effects Included 
+# (This is model_final from Step 8, which already uses standard SEs)
+
+# Extract Standard Errors for comparative reporting
+se_naive <- summary(model_naive)$coefficients[, 2]
+se_fe <- summary(model_final)$coefficients[, 2]
+
+# 1. Output to Console (Verification)
+stargazer(
+  list(model_naive, model_final),
+  type = "text",
+  se = list(se_naive, se_fe), 
+  title = "Table 3: Model Evolution (The Impact of Cantonal Fixed Effects)",
+  dep.var.labels = "New PV Capacity (Watts/Capita)",
+  column.labels = c("Naive OLS", "+ Cantonal FE (Baseline)"),
+  covariate.labels = final_labels_clean,
+  omit = "Canton",
+  add.lines = list(c("Cantonal Fixed Effects Included?", "No", "Yes")),
+  keep.stat = c("n", "adj.rsq"),
+  digits = 2,
+  notes = "Note: Standard OLS errors utilized for baseline draft."
+)
+
+# 2. Output to Word Document
+stargazer(
+  list(model_naive, model_final),
+  type = "html",
+  se = list(se_naive, se_fe), 
+  out = here("data", "processed", "Table_A0_Model_Evolution.doc"),
+  title = "Table 3: Model Evolution (The Impact of Cantonal Fixed Effects)",
+  dep.var.labels = "New PV Capacity (Watts/Capita)",
+  column.labels = c("Naive OLS", "+ Cantonal FE (Baseline)"),
+  covariate.labels = final_labels_clean,
+  omit = "Canton",
+  add.lines = list(c("Cantonal Fixed Effects Included?", "No", "Yes")),
+  keep.stat = c("n", "adj.rsq"),
+  digits = 2,
+  notes = "Note: Standard OLS errors utilized for baseline draft."
+)
+# ===================================================================
+# STEP 9: ROBUSTNESS CHECKS & SENSITIVITY ANALYSIS
+# ===================================================================
+# Methodological Note: Evaluates the structural stability of the core 
+# findings by substituting the primary economic proxy and mitigating 
+# the potential distortion of high-leverage outliers.
+
+print("Executing Robustness Checks (Long-Term Price & Trimmed Panel)...")
+
+# -------------------------------------------------------------------
+# ROBUSTNESS MODEL 1: LONG-TERM PRICE PROXY (BEHAVIORAL SENSITIVITY)
+# -------------------------------------------------------------------
+# Methodological Note: Substitutes the acute 2023 peak price with the 
+# 10-year historical average to test for 'status quo bias' versus 
+# acute price shock salience.
+model_robust_mean <- lm(
+  New_Watts_per_Capita ~ Mean_Price_13_23 + 
+    log(Baseline_PV_Density_2017 + 1) + Left_Green_Share_2023 +
+    Irradiation_kWh_m2 + 
+    log(Taxable_Income) + log(Population_Density) + Share_SFH + as.factor(Canton), 
+  data = final_dataset
+)
+
+# -------------------------------------------------------------------
+# ROBUSTNESS MODEL 2: HIGH-LEVERAGE OUTLIER EXCLUSION (TRIMMED PANEL)
+# -------------------------------------------------------------------
+# Methodological Note: Re-estimates the primary specification after 
+# excluding the 99th percentile of the dependent variable to ensure 
+# coefficients are not artificially driven by extreme "super-adopters."
+threshold_99 <- quantile(final_dataset$New_Watts_per_Capita, 0.99, na.rm = TRUE)
+
+data_trimmed <- final_dataset %>% filter(New_Watts_per_Capita <= threshold_99)
+
+model_robust_trimmed <- lm(
+  New_Watts_per_Capita ~ Peak_Price_2023 + 
+    log(Baseline_PV_Density_2017 + 1) + Left_Green_Share_2023 + 
+    Irradiation_kWh_m2 + 
+    log(Taxable_Income) + log(Population_Density) + Share_SFH + as.factor(Canton), 
+  data = data_trimmed
+)
+
+# -------------------------------------------------------------------
+# GENERATE ROBUSTNESS TABLE (MAIN APPENDIX) Table A1
+# -------------------------------------------------------------------
+robust_labels <- c(
+  "Peak Elec. Price 2023 [H1]",
+  "10-Year Average Price (13-23) [Alt H1]",
+  "Baseline PV Density 2017 (Log) [H2]",
+  "Left-Green Party Share (%) [H3]",
+  "Control: Solar Irradiation",
+  "Control: Taxable Income (Log)",
+  "Control: Population Density (Log)",
+  "Control: Single-Family Home Share (%)"
+)
+
+# 1. Output to Console (Verification)
+stargazer(
+  list(model_final, model_robust_mean, model_robust_trimmed),
+  type = "text",
+  title = "Table A1: Robustness Checks (Average Price & Trimmed Sample)",
+  dep.var.labels = "New PV Capacity (Watts/Capita)",
+  column.labels = c("Main Model", "Long-Term Average", "Trimmed (No Top 1%)"),
+  covariate.labels = robust_labels,
+  order = c("Peak_Price", "Mean_Price", "Baseline", "Left_Green", "Irradiation", "Taxable_Income", "Population_Density", "Share_SFH"),
+  omit = "Canton",
+  add.lines = list(c("Cantonal Fixed Effects Included?", "Yes", "Yes", "Yes")),
+  keep.stat = c("n", "adj.rsq"),
+  digits = 2,
+  notes = "Note: Standard OLS errors utilized for baseline draft. Model (3) excludes the 99th percentile."
+)
+
+# 2. Output to Word Document (Thesis Appendix)
+stargazer(
+  list(model_final, model_robust_mean, model_robust_trimmed),
+  type = "html",
+  out = here("data", "processed", "Table_A1_Robustness_Checks.doc"),
+  title = "Table A1: Robustness Checks (Average Price & Trimmed Sample)",
+  dep.var.labels = "New PV Capacity (Watts/Capita)",
+  column.labels = c("Main Model", "Long-Term Average", "Trimmed (No Top 1%)"),
+  covariate.labels = robust_labels,
+  order = c("Peak_Price", "Mean_Price", "Baseline", "Left_Green", "Irradiation", "Taxable_Income", "Population_Density", "Share_SFH"),
+  omit = "Canton",
+  add.lines = list(c("Cantonal Fixed Effects Included?", "Yes", "Yes", "Yes")),
+  keep.stat = c("n", "adj.rsq"),
+  digits = 2,
+  notes = "Note: Standard OLS errors utilized for baseline draft. Model (3) excludes the 99th percentile."
 )
