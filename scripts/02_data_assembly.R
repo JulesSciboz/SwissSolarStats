@@ -32,7 +32,6 @@ final_dataset <- solar_agg_commune %>%
   # Execute sequential left-joins to bind all structural predictors and controls
   left_join(population_clean, by = "BFS_Nr") %>%
   left_join(elcom_clean, by = "BFS_Nr") %>%          
-  left_join(green_index_clean, by = "BFS_Nr") %>%   
   left_join(left_green_clean, by = "BFS_Nr") %>%    
   left_join(irradiation_clean, by = "BFS_Nr") %>%   
   left_join(peer_effects_clean, by = "BFS_Nr") %>%  
@@ -41,9 +40,9 @@ final_dataset <- solar_agg_commune %>%
   left_join(sfh_clean, by = "BFS_Nr") %>%
   
   mutate(
-    # Impute structural zeros: Municipalities with no pre-2018 installations 
-    # correctly have a baseline density of 0, not NA.
-    Baseline_PV_Density_2017 = coalesce(Baseline_PV_Density_2017, 0),
+    # FIX: Handle structural zeros for raw historical watts first
+    Baseline_Total_Watts_2017 = coalesce(Baseline_Total_Watts_2017, 0),
+        Baseline_PV_Density_2017 = Baseline_Total_Watts_2017 / Population,
     
     # Standardize Core Dependent Variable
     # Convert kilowatts to watts and scale by population to allow for 
@@ -78,6 +77,5 @@ print(paste("Data processing pipeline complete. Analytical dataset serialized to
 # -------------------------------------------------------------------
 # OPTIONAL: CLEAN UP ENVIRONMENT
 # -------------------------------------------------------------------
-# Frees up RAM by removing the intermediate dataframes, keeping only the final object.
 rm(list = setdiff(ls(), c("final_dataset")))
 print("Environment cleaned. Ready for exploratory data analysis.")

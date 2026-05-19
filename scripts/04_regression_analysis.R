@@ -27,9 +27,14 @@ final_labels_clean <- c(
 # -------------------------------------------------------------------
 # 2. METHODOLOGICAL JUSTIFICATION (NAIVE VS FIXED EFFECTS)
 # -------------------------------------------------------------------
-print("Estimating Naive and Fixed Effects Baseline Models...")
+print("Estimating Bivariate Models and Full Specification...")
 
-# Model 1: Naive OLS (No Canton Fixed Effects)
+# --- Bivariate Models (Testing Hypotheses in Isolation) ---
+model_h1 <- lm(New_Watts_per_Capita ~ Peak_Price_2023 + as.factor(Canton), data = final_dataset)
+model_h2 <- lm(New_Watts_per_Capita ~ log(Baseline_PV_Density_2017 + 1) + as.factor(Canton), data = final_dataset)
+model_h3 <- lm(New_Watts_per_Capita ~ Left_Green_Share_2023 + as.factor(Canton), data = final_dataset)
+
+# --- Naive Multivariate Model (NO Fixed Effects) ---
 model_naive <- lm(
   New_Watts_per_Capita ~ Peak_Price_2023 + 
     log(Baseline_PV_Density_2017 + 1) + Left_Green_Share_2023 + 
@@ -38,7 +43,7 @@ model_naive <- lm(
   data = final_dataset
 )
 
-# Model 2: Optimized Model (Cantonal Fixed Effects)
+# --- Full Multivariate Model (Primary Result WITH Fixed Effects) ---
 model_final <- lm(
   New_Watts_per_Capita ~ Peak_Price_2023 + 
     log(Baseline_PV_Density_2017 + 1) + Left_Green_Share_2023 + 
@@ -67,21 +72,35 @@ stargazer(
   notes = "Note: Standard OLS errors utilized for baseline draft."
 )
 
-# Output Table 4: Final Regression Analysis
+# --- Table 4: Primary Multivariate Regression Output ---
 stargazer(
   model_final,
   type = "html",
-  out = here("data", "processed", "Table4_Final_Regression_Analysis.doc"), 
-  title = "Table 4: Regression Analysis of Swiss Municipal Solar Adoption",
+  out = here("data", "processed", "Table4_Multivariate_Regression.doc"), 
+  title = "Table 4: Regression Analysis of Swiss Municipal Solar Adoption (Full Model)",
   dep.var.labels = "New PV Capacity (Watts/Capita)",
   covariate.labels = final_labels_clean,
   column.labels = "2018-2024",
-  order = c("Peak_Price", "Baseline", "Left_Green", "Irradiation", "Taxable_Income", "Population_Density", "Share_SFH"),
   omit = "Canton",
-  add.lines = list(c("Cantonal Fixed Effects Included?", "Yes")),
+  add.lines = list(c("Cantonal Fixed Effects?", "Yes")),
   keep.stat = c("n", "adj.rsq"),
-  digits = 2,
-  notes = "Note: Standard OLS errors utilized for baseline draft."
+  digits = 2
+)
+
+# --- Table 5: Progressive Analysis ---
+# Document file output
+stargazer(
+  list(model_h1, model_h2, model_h3, model_final),
+  type = "html",
+  out = here("data", "processed", "Table5_Bivariate_to_Multivariate_Output.doc"), 
+  title = "Table 5: Model Evolution - Bivariate vs. Multivariate Regression",
+  dep.var.labels = "New PV Capacity (Watts/Capita)",
+  column.labels = c("H1: Econ", "H2: Social", "H3: Pol", "Full Model"),
+  covariate.labels = final_labels_clean,
+  omit = "Canton",
+  add.lines = list(c("Cantonal Fixed Effects?", "Yes", "Yes", "Yes", "Yes")),
+  keep.stat = c("n", "adj.rsq"),
+  digits = 2
 )
 
 # -------------------------------------------------------------------
@@ -120,7 +139,10 @@ model_results <- tidy(model_final, conf.int = TRUE) %>%
 
 coef_plot <- ggplot(model_results, aes(x = estimate, y = term, color = Significant)) +
   geom_vline(xintercept = 0, color = "black", linetype = "dashed", linewidth = 0.8) +
-  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, linewidth = 1) +
+  geom_errorbar(aes(xmin = conf.low, xmax = conf.high), 
+                height = 0.2, 
+                linewidth = 1, 
+                orientation = "y") +
   geom_point(size = 4) +
   geom_text(aes(label = round(estimate, 1)), vjust = -1.5, size = 3.5, fontface = "bold", color = "black") +
   facet_wrap(~Variable_Group, scales = "free", ncol = 1) +

@@ -21,25 +21,16 @@ print("Generating Descriptive Statistics Matrix...")
 # Isolate Analytical Variables
 desc_data <- final_dataset %>%
   select(
-    # DEPENDENT VARIABLE
     `New PV Capacity (Watts/Capita)` = New_Watts_per_Capita,
-    
-    # H1: ECONOMIC INCENTIVES
     `Peak Elec. Price 2023 (Rp/kWh) [H1]` = Peak_Price_2023,
-    
-    # H2: SOCIAL MOMENTUM
     `Baseline PV Density 2017 (Watts/Capita) [H2]` = Baseline_PV_Density_2017, 
-    
-    # H3: POLITICAL IDEOLOGY
     `Left-Green Party Share (%) [H3]` = Left_Green_Share_2023,
-    
-    # CONTROL VARIABLES
     `Taxable Income (CHF/Taxpayer)` = Taxable_Income,
     `Population Density (Inh./km2)` = Population_Density,
     `Solar Irradiation (kWh/m2)` = Irradiation_kWh_m2,
     `Single-Family Home Share (%)` = Share_SFH
   ) %>%
-  as.data.frame() # Stargazer requires base R data.frames, not tibbles
+  as.data.frame()
 
 # Output to Console (Verification)
 stargazer(
@@ -59,36 +50,34 @@ stargazer(
 )
 
 # -------------------------------------------------------------------
-# 3. DISTRIBUTIONAL AUDIT (HISTOGRAMS)
+# 3. UNIFIED DATA TRANSFORMATION FOR VISUALIZATIONS
 # -------------------------------------------------------------------
-# Methodological Note: Validates variable distributions to justify the 
-# log-transformations applied to highly skewed structural covariates 
-# (Wealth and Population Density) required by OLS assumptions.
+# Optimization: We mutate the labels once with unified nomenclature 
+# to ensure perfect consistency between Histograms and Scatterplots.
 
-print("Executing Distributional Audits...")
-
-# Transform Data for Faceted Auditing
-hist_clean_dataset <- final_dataset %>%
+plot_dataset <- final_dataset %>%
   mutate(
     `Dep. Var: New PV Watts/Capita` = New_Watts_per_Capita,
     `H1: Peak Price 2023` = Peak_Price_2023,
     `H2: Baseline PV Density 2017 (Log)` = log(Baseline_PV_Density_2017 + 1),
-    `H3: Left-Green Party Share` = Left_Green_Share_2023,
-    `Control: Taxable Income (Log)` = log(Taxable_Income),
-    `Control: Population Density (Log)` = log(Population_Density),
-    `Control: Solar Irradiation` = Irradiation_kWh_m2,
-    `Control: SFH Share (%)` = Share_SFH
-  ) %>%
-  select(
-    starts_with("Dep."), starts_with("H1"), starts_with("H2"), 
-    starts_with("H3"), starts_with("Control")
-  ) %>%
+    `H3: Left-Green Share (%)` = Left_Green_Share_2023,
+    `Ctrl: Taxable Income (Log)` = log(Taxable_Income),
+    `Ctrl: Population Density (Log)` = log(Population_Density),
+    `Ctrl: Solar Irradiation` = Irradiation_kWh_m2,
+    `Ctrl: SFH Share (%)` = Share_SFH
+  )
+
+# -------------------------------------------------------------------
+# 4. DISTRIBUTIONAL AUDIT (HISTOGRAMS)
+# -------------------------------------------------------------------
+print("Executing Distributional Audits...")
+
+hist_data <- plot_dataset %>%
+  select(starts_with("Dep."), starts_with("H"), starts_with("Ctrl")) %>%
   pivot_longer(cols = everything(), names_to = "Variable", values_to = "Value")
 
-# Render Distribution Grid
-hist_plot <- ggplot(hist_clean_dataset, aes(x = Value)) +
+hist_plot <- ggplot(hist_data, aes(x = Value)) +
   geom_histogram(bins = 30, fill = "#2c3e50", color = "white", alpha = 0.8) +
-  # Independent facet scaling allows visualization across heterogenous unit ranges
   facet_wrap(~ Variable, scales = "free", ncol = 3) + 
   theme_minimal() +
   labs(
@@ -107,33 +96,16 @@ print(hist_plot)
 ggsave(here("plots", "EDA_1_Histograms_Final.png"), plot = hist_plot, width = 12, height = 10, dpi = 300)
 
 # -------------------------------------------------------------------
-# 4. BIVARIATE CORRELATION ANALYSIS (SCATTERPLOTS)
+# 5. BIVARIATE CORRELATION ANALYSIS (SCATTERPLOTS)
 # -------------------------------------------------------------------
-# Methodological Note: Visualizes unadjusted, bivariate linear trends 
-# between individual predictors and the dependent variable to assess 
-# structural directionality before applying covariate controls.
-
 print("Executing Bivariate Visualizations...")
 
-# Transform Data for Faceted Plotting
-scatter_data <- final_dataset %>%
-  mutate(
-    `H1: Peak Price 2023` = Peak_Price_2023,
-    `H2: Baseline PV Density 2017 (Log)` = log(Baseline_PV_Density_2017 + 1),
-    `H3: Left-Green Share (%)` = Left_Green_Share_2023,
-    `Ctrl: Solar Irradiation` = Irradiation_kWh_m2,
-    `Ctrl: Taxable Income (Log)` = log(Taxable_Income),
-    `Ctrl: Pop. Density (Log)` = log(Population_Density),
-    `Ctrl: SFH Share (%)` = Share_SFH
-  ) %>%
+scatter_data <- plot_dataset %>%
   select(New_Watts_per_Capita, starts_with("H"), starts_with("Ctrl")) %>%
   pivot_longer(cols = -New_Watts_per_Capita, names_to = "Predictor", values_to = "Value")
 
-# Render Structural Correlation Plot
 scatter_plot <- ggplot(scatter_data, aes(x = Value, y = New_Watts_per_Capita)) +
-  # Mitigate overplotting via alpha blending for high-N municipal observations
   geom_point(alpha = 0.2, color = "#2ecc71", size = 1) + 
-  # Overlay unadjusted linear models
   geom_smooth(method = "lm", color = "#c0392b", fill = "#e74c3c", alpha = 0.2) +
   facet_wrap(~ Predictor, scales = "free_x", ncol = 4) + 
   theme_minimal() +
