@@ -1,5 +1,6 @@
 # Ignore all downloaded raw data
 data/raw/*
+data/processed/*
 
 # EXCEPT the lightweight population data (Bundle this with the repo)
 !data/raw/px-x-0102020000_201.json
@@ -8,6 +9,8 @@ data/raw/*
 Import BFE*/
 Import Swisstopo/
 Import BFS Commune/
+archive/
+
 
 # Ignore all generated output files
 data/processed/
