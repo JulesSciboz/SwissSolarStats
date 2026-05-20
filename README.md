@@ -4,6 +4,18 @@ This project analyzes the determinants of photovoltaic (PV) adoption across Swis
 
 By merging administrative energy data with socio-economic indicators, physical solar irradiation, and cantonal fixed effects, we isolate the growth of solar capacity between 2018 and 2024. The ultimate regression model explicitly tests the impact of federal electricity price shocks (H1), local social momentum/peer effects (H2), green political ideology (H3), and structural constraints like the "Urban Renter Paradox" via single-family home shares.
 
+## 🎓 Academic Context & Credits
+
+This repository contains the replication code and data for a research project conducted at the University of Bern[cite: 3]. 
+
+* **Institution:** KPM Center for Public Management, University of Bern.
+* **Course:** Empirisches Forschungspraktikum in Verwaltungswissenschaft (HS25/FS26).
+* **Instructor:** Jule Ksinsik.
+* **Authors:** Jules Sciboz, Loris Di Marco, Matteo Crescenti.
+
+*This project was developed as part of the academic curriculum. The authors retain full responsibility for the data analysis, data preparation, and interpretations presented herein.*
+
+
 ## 🚀 How to Reproduce This Study
 
 To ensure full reproducibility across different operating systems (Windows, Mac, Linux) while respecting GitHub's file size limits, this project uses the here package for relative file paths and excludes the massive raw data files from the repository.
