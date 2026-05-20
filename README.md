@@ -26,59 +26,59 @@ Download the following files and place them exactly as named into the data/raw/ 
 
 ### 1. Federal Office of Energy (BFE) - Solar Installations
 
-    Source: [Elektrizitätsproduktionsanlagen](https://opendata.swiss/de/dataset/elektrizitatsproduktionsanlagen)
+Source: [Elektrizitätsproduktionsanlagen](https://opendata.swiss/de/dataset/elektrizitatsproduktionsanlagen)
 
-    Action: Download the CSV file.
+- Action: Download the CSV file.
 
-    Save as: ElectricityProductionPlant.csv
+- Save as: ElectricityProductionPlant.csv
 
 ### 2. Swisstopo - Official Directory of Towns and Cities
 
-    Source: [Amtliches Ortschaftenverzeichnis](https://data.geo.admin.ch/ch.swisstopo-vd.ortschaftenverzeichnis_plz/ortschaftenverzeichnis_plz/ortschaftenverzeichnis_plz_2056.csv.zip)
+Source: [Amtliches Ortschaftenverzeichnis](https://data.geo.admin.ch/ch.swisstopo-vd.ortschaftenverzeichnis_plz/ortschaftenverzeichnis_plz/ortschaftenverzeichnis_plz_2056.csv.zip)
 
-    Action: Download the CSV (LV95 format).
+- Action: Download the CSV (LV95 format).
 
-    Save as: AMTOVZ_CSV_LV95.csv
+- Save as: AMTOVZ_CSV_LV95.csv
 
 ### 3. BFS - National Council Elections (H3: Left-Green Strength)
 
-    Source: [Link to BFS Elections Database](https://www.bfs.admin.ch/bfs/fr/home/statistiques/catalogue.assetdetail.28945919.html)
+Source: [Link to BFS Elections Database](https://www.bfs.admin.ch/bfs/fr/home/statistiques/catalogue.assetdetail.28945919.html)
     
-    Action: Download the 2023 election results (NDJSON format).
+- Action: Download the 2023 election results (NDJSON format).
 
-    Save as: NRW_2023_Dataset.json
+- Save as: NRW_2023_Dataset.json
 
 ### 4. Physical Solar Irradiation (Geographical Control)
 
-    Source: MeteoSwiss / Federal Office of Energy
+Source: MeteoSwiss / Federal Office of Energy
 
-    Action: Already in the files
+- Action: Already in the files
 
-    Save as: solar_radiation_per_municipality.xlsx
+- Save as: solar_radiation_per_municipality.xlsx
 
 ### 5. BFS - Building Structure (Urban Renter Control)
 
-    Source: [Federal Statistical Office (GWS)](https://www.bfs.admin.ch/bfs/en/home/statistics/construction-housing/buildings.assetdetail.36162966.html)
+Source: [Federal Statistical Office (GWS)](https://www.bfs.admin.ch/bfs/en/home/statistics/construction-housing/buildings.assetdetail.36162966.html)
 
-    Action: Download the building category dataset for 2021.
+- Action: Download the building category dataset for 2021.
 
-    Save as: CH1.GWS,DF_GWS_REG1,1.0.0+all.csv
+- Save as: CH1.GWS,DF_GWS_REG1,1.0.0+all.csv
 
 ### 6. BFS - Municipal Wealth & Taxable Income
 
-    Source: [Federal Statistical Office](https://dam-api.bfs.admin.ch/hub/api/dam/assets/7267501/appendix?width=1080&height=1920)
+Source: [Federal Statistical Office](https://dam-api.bfs.admin.ch/hub/api/dam/assets/7267501/appendix?width=1080&height=1920)
 
-    Action: Download the municipal tax dataset.
+- Action: Download the municipal tax dataset.
 
-    Save as: 27598_DE.csv
+- Save as: 27598_DE.csv
 
 ### 7. BFS - Population Density
 
-    Source: Federal Statistical Office
+Source: Federal Statistical Office
 
-    Action: Already in the files
+- Action: Already in the files
 
-    Save as: population_density_2018_2023(in).csv
+- Save as: population_density_2018_2023(in).csv
 
 ### Live API Integration (ElCom Tariff Data)
 
@@ -88,18 +88,18 @@ This pipeline utilizes the official Swiss Federal Linked Data Service (LINDAS) t
 
 Open master.R in the root directory and source the script. It will sequentially execute the modular files in the scripts/ folder:
 
-    00_config.R: Installs missing dependencies and builds directory trees.
+- 00_config.R: Installs missing dependencies and builds directory trees.
 
-    01_data_preparation.R: Ingests, filters, and standardizes raw structural datasets.
+- 01_data_preparation.R: Ingests, filters, and standardizes raw structural datasets.
 
-    02_data_assembly.R: Executes spatial joins via BFS_Nr to build the unified solar_growth_2018_2024_final.rds master panel.
+- 02_data_assembly.R: Executes spatial joins via BFS_Nr to build the unified solar_growth_2018_2024_final.rds master panel.
 
-    03_eda_visualizations.R: Renders summary statistics (Table 1) and exploratory structural scatterplots/histograms to the plots/ folder.
+- 03_eda_visualizations.R: Renders summary statistics (Table 1) and exploratory structural scatterplots/histograms to the plots/ folder.
 
-    04_regression_analysis.R: Estimates the progressive bivariate to multivariate OLS models (with Cantonal fixed effects) and generates formatted .doc tables (Tables 3, 4, 5) and the coefficient forest plot.
+- 04_regression_analysis.R: Estimates the progressive bivariate to multivariate OLS models (with Cantonal fixed effects) and generates formatted .doc tables (Tables 3, 4, 5) and the coefficient forest plot.
 
 ### The directory structure must look like this:
-
+<pre>
 SwissSolarStats/
 ├── data/
 │   ├── processed/   (Final datasets and tables will save here)
@@ -113,3 +113,4 @@ SwissSolarStats/
 │   └── 04_regression_analysis.R
 ├── master.R         (The central execution script)
 └── README.md
+<pre>
