@@ -8,29 +8,12 @@ By merging administrative energy data with socio-economic indicators, physical s
 To ensure full reproducibility across different operating systems (Windows, Mac, Linux) while respecting GitHub's file size limits, this project uses the here package for relative file paths and excludes the massive raw data files from the repository.
 
 Replicate this analysis by following these steps:
+
 Step 1: Clone and Setup
 
-    Clone this repository to your local machine.
+- Clone this repository to your local machine.
 
-    Open the R project file (SwissSolarStats.Rproj) in RStudio.
-
-    The directory structure must look exactly like this:
-
-Plaintext
-
-SwissSolarStats/
-├── data/
-│   ├── processed/   (Final datasets and tables will save here)
-│   └── raw/         (You will put the downloaded raw data here)
-├── plots/           (Generated EDA graphs will save here)
-├── scripts/
-│   ├── 00_config.R
-│   ├── 01_data_preparation.R
-│   ├── 02_data_assembly.R
-│   ├── 03_eda_visualizations.R
-│   └── 04_regression_analysis.R
-├── master.R         (The central execution script)
-└── README.md
+- Open the R project file (SwissSolarStats.Rproj) in RStudio.
 
 Step 2: Download the Raw Data
 
@@ -112,3 +95,19 @@ Open master.R in the root directory and source the script. It will sequentially 
     03_eda_visualizations.R: Renders summary statistics (Table 1) and exploratory structural scatterplots/histograms to the plots/ folder.
 
     04_regression_analysis.R: Estimates the progressive bivariate to multivariate OLS models (with Cantonal fixed effects) and generates formatted .doc tables (Tables 3, 4, 5) and the coefficient forest plot.
+
+The directory structure must look like this:
+
+SwissSolarStats/
+├── data/
+│   ├── processed/   (Final datasets and tables will save here)
+│   └── raw/         (You will put the downloaded raw data here)
+├── plots/           (Generated EDA graphs will save here)
+├── scripts/
+│   ├── 00_config.R
+│   ├── 01_data_preparation.R
+│   ├── 02_data_assembly.R
+│   ├── 03_eda_visualizations.R
+│   └── 04_regression_analysis.R
+├── master.R         (The central execution script)
+└── README.md
