@@ -32,7 +32,7 @@ Replicate this analysis by following these steps:
 
 Because GitHub has a 100MB file size limit, the heavy Swiss energy and geographic datasets cannot be hosted directly in this repository.
 
-Note: The lightweight municipal population dataset (px-x-0102020000_201.json) is already bundled in the data/raw/ folder for your convenience.
+Note: The lightweight municipal population datasets are already bundled in the data/raw/ folder for your convenience.
 
 Download the following files and place them exactly as named into the data/raw/ folder:
 
