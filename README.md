@@ -6,7 +6,7 @@ By merging administrative energy data with socio-economic indicators, physical s
 
 ## 🎓 Academic Context & Credits
 
-This repository contains the replication code and data for a research project conducted at the University of Bern[cite: 3]. 
+This repository contains the replication code and data for a research project conducted at the University of Bern. 
 
 * **Institution:** KPM Center for Public Management, University of Bern.
 * **Course:** Empirisches Forschungspraktikum in Verwaltungswissenschaft (HS25/FS26).
