@@ -26,7 +26,7 @@ Download the following files and place them exactly as named into the data/raw/ 
 
 ### 1. Federal Office of Energy (BFE) - Solar Installations
 
-    Source: Elektrizitätsproduktionsanlagen
+    Source: [Elektrizitätsproduktionsanlagen](https://opendata.swiss/de/dataset/elektrizitatsproduktionsanlagen)
 
     Action: Download the CSV file.
 
@@ -34,7 +34,7 @@ Download the following files and place them exactly as named into the data/raw/ 
 
 ### 2. Swisstopo - Official Directory of Towns and Cities
 
-    Source: Amtliches Ortschaftenverzeichnis
+    Source: [Amtliches Ortschaftenverzeichnis](https://data.geo.admin.ch/ch.swisstopo-vd.ortschaftenverzeichnis_plz/ortschaftenverzeichnis_plz/ortschaftenverzeichnis_plz_2056.csv.zip)
 
     Action: Download the CSV (LV95 format).
 
@@ -42,8 +42,8 @@ Download the following files and place them exactly as named into the data/raw/ 
 
 ### 3. BFS - National Council Elections (H3: Left-Green Strength)
 
-    Source: Link to BFS Elections Database
-
+    Source: [Link to BFS Elections Database](https://www.bfs.admin.ch/bfs/fr/home/statistiques/catalogue.assetdetail.28945919.html)
+    
     Action: Download the 2023 election results (NDJSON format).
 
     Save as: NRW_2023_Dataset.json
@@ -52,13 +52,13 @@ Download the following files and place them exactly as named into the data/raw/ 
 
     Source: MeteoSwiss / Federal Office of Energy
 
-    Action: Download the municipal solar potential dataset.
+    Action: Already in the files
 
     Save as: solar_radiation_per_municipality.xlsx
 
-### 5. BFS - Building Structure (Urban Renter Paradox Control)
+### 5. BFS - Building Structure (Urban Renter Control)
 
-    Source: Federal Statistical Office (GWS)
+    Source: [Federal Statistical Office (GWS)](https://www.bfs.admin.ch/bfs/en/home/statistics/construction-housing/buildings.assetdetail.36162966.html)
 
     Action: Download the building category dataset for 2021.
 
@@ -66,7 +66,7 @@ Download the following files and place them exactly as named into the data/raw/ 
 
 ### 6. BFS - Municipal Wealth & Taxable Income
 
-    Source: Federal Statistical Office
+    Source: [Federal Statistical Office](https://dam-api.bfs.admin.ch/hub/api/dam/assets/7267501/appendix?width=1080&height=1920)
 
     Action: Download the municipal tax dataset.
 
@@ -76,7 +76,7 @@ Download the following files and place them exactly as named into the data/raw/ 
 
     Source: Federal Statistical Office
 
-    Action: Download the municipal density dataset.
+    Action: Already in the files
 
     Save as: population_density_2018_2023(in).csv
 
